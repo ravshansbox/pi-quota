@@ -40,7 +40,12 @@ export default function (pi: ExtensionAPI) {
   let ctxRef: any = null;
 
   function updateWidget() {
-    if (!ctxRef || !currentProvider) return;
+    if (!ctxRef) return;
+
+    if (!currentProvider) {
+      ctxRef.ui.setWidget("pi-quota", undefined);
+      return;
+    }
     
     const providerKey = currentProvider === "openai-codex" ? "openai" : currentProvider;
     const state = states.find((s) => s.provider === providerKey);
