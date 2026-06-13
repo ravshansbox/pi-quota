@@ -204,6 +204,7 @@ export default function (pi: ExtensionAPI) {
   let ctxRef: ExtensionContext | null = null;
   let isLeader = false;
   let leaseStaleMs = 180000;
+  let botPollError: string | null = null;
   const resetTimers = new Map<string, TimerRecord>();
   const selfLease = (): Lease => ({ pid: process.pid, host: hostname(), ts: Date.now() });
 
@@ -272,7 +273,21 @@ export default function (pi: ExtensionAPI) {
     }
 
     const text = formatQuotaStatus([state], false);
-    ctxRef.ui.setWidget("pi-quota", [text]);
+    const statusText = botPollError ? `${text} · telegram ${botPollError}` : text;
+    ctxRef.ui.setWidget("pi-quota", [statusText]);
+  }
+
+  function formatBotPollError(error: unknown): string {
+    const code = error instanceof Error && "cause" in error && error.cause && typeof error.cause === "object" && "code" in error.cause
+      ? String(error.cause.code)
+      : error instanceof Error && "code" in error
+        ? String(error.code)
+        : null;
+
+    if (code === "ETIMEDOUT") return "timeout";
+    if (error instanceof TypeError && error.message === "fetch failed") return "fetch failed";
+    if (error instanceof Error && error.message) return error.message;
+    return "failed";
   }
 
   function syncResetTimer(state: QuotaState, window: ResetWindow, reset: Date | null) {
@@ -492,8 +507,15 @@ export default function (pi: ExtensionAPI) {
 
       const response = await fetch(`https://api.telegram.org/bot${config.botToken}/getUpdates?${params.toString()}`);
       if (!response.ok) {
+        botPollError = `HTTP ${response.status}`;
         console.error(`pi-quota: getUpdates failed: ${response.status}`);
+        updateWidget();
         return;
+      }
+
+      if (botPollError) {
+        botPollError = null;
+        updateWidget();
       }
 
       const data = await response.json() as { result?: TelegramUpdate[] };
@@ -512,7 +534,9 @@ export default function (pi: ExtensionAPI) {
         await sendTelegram(config, formatQuotaStatus(states));
       }
     } catch (error) {
-      console.error("pi-quota: getUpdates error:", error);
+      botPollError = formatBotPollError(error);
+      console.error(`pi-quota: getUpdates error: ${botPollError}`);
+      updateWidget();
     }
   }
 
