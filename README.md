@@ -1,6 +1,6 @@
 # pi-quota
 
-Pi extension that tracks Anthropic and OpenAI Codex quota usage and sends Telegram notifications when quotas reset.
+Pi extension that tracks Anthropic and OpenAI Codex quota usage and sends Telegram notifications when quota windows reset.
 
 ## Installation
 
@@ -27,22 +27,30 @@ Run `pi update` to install.
 |-------|----------|---------|-------------|
 | `botToken` | Yes | — | Telegram Bot API token |
 | `chatId` | Yes | — | Telegram chat ID |
-| `pollIntervalMs` | No | 600000 | Polling interval (ms, minimum 60000) |
+| `pollIntervalMs` | No | 600000 | Polling interval in milliseconds, minimum 60000 |
 
 ## Commands
 
-- `/quota` — Show current quota status with progress bars
+- `/quota` — show current quota status
 
-## How It Works
+## Behaviour
 
-1. Polls Anthropic and OpenAI Codex usage APIs every 10 minutes using OAuth tokens from `~/.pi/agent/auth.json`
-2. Displays 5-hour and weekly quota usage with progress bars
-3. Sends Telegram notification when a quota window resets
+- Polls Anthropic and OpenAI Codex usage endpoints every 10 minutes by default
+- Shows a widget below the prompt when the active provider is `anthropic` or `openai-codex`
+- Widget format: `7d: 89% left (1d 13h), 5h: 30% left (4h 39m)`
+- `/quota` shows both windows with bars
+- Schedules one-shot timers for each known reset time and sends a Telegram message when a `5h` or `7d` window resets
+- Refreshes Anthropic and OpenAI Codex OAuth access tokens from `~/.pi/agent/auth.json` when needed and writes updated credentials back
 
-## Output Example
+## Output example
 
-```
+```text
 anthropic:
-  week [████████████████████] 100% (1d 13h)
-  5h   [████████░░░░░░░░░░░░] 40% (23m)
+  7d [████████████████████] 100% (1d 13h)
+  5h [████████░░░░░░░░░░░░] 40% (23m)
 ```
+
+## Notes
+
+- Reset notifications work while pi is running.
+- Polling keeps the displayed quota fresh and resynchronises reset timers if the provider changes a reset timestamp.

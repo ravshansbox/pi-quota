@@ -1,7 +1,14 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  clearResetTimers,
+  scheduleResetTimers,
+  sendResetNotification,
+  syncResetTimers,
+  type TimerMap,
+} from "./quota-core.ts";
 import {
   type QuotaConfig,
   type QuotaState,
@@ -20,14 +27,31 @@ function loadConfig(): QuotaConfig | null {
   }
 }
 
-function loadAuth(): Record<string, { type?: string; access?: string; key?: string }> | null {
+type OAuthAuthRecord = {
+  type?: string;
+  access?: string;
+  refresh?: string;
+  expires?: number;
+  key?: string;
+};
+
+type AuthFile = Record<string, OAuthAuthRecord>;
+
+function authPath() {
+  return join(homedir(), ".pi", "agent", "auth.json");
+}
+
+function loadAuth(): AuthFile | null {
   try {
-    const authPath = join(homedir(), ".pi", "agent", "auth.json");
-    const raw = readFileSync(authPath, "utf-8");
-    return JSON.parse(raw);
+    const raw = readFileSync(authPath(), "utf-8");
+    return JSON.parse(raw) as AuthFile;
   } catch {
     return null;
   }
+}
+
+function saveAuth(auth: AuthFile) {
+  writeFileSync(authPath(), JSON.stringify(auth, null, 2));
 }
 
 export default function (pi: ExtensionAPI) {
@@ -35,7 +59,22 @@ export default function (pi: ExtensionAPI) {
   let config: QuotaConfig | null = null;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let currentProvider: string | null = null;
-  let ctxRef: any = null;
+  let ctxRef: ExtensionContext | null = null;
+  let resetTimers: TimerMap = new Map();
+
+  function timerDeps() {
+    return {
+      setTimer(fn: () => void | Promise<void>, delay: number) {
+        return setTimeout(fn, delay);
+      },
+      clearTimer(handle: unknown) {
+        clearTimeout(handle as ReturnType<typeof setTimeout>);
+      },
+      async notify(provider: "anthropic" | "openai", window: "5h" | "7d", state: QuotaState, quotaConfig: QuotaConfig) {
+        return sendResetNotification(provider, window, state, quotaConfig, sendTelegram);
+      },
+    };
+  }
 
   function updateWidget() {
     if (!ctxRef) return;
@@ -101,13 +140,17 @@ export default function (pi: ExtensionAPI) {
 
     const scheduleCheck = () => {
       checkTimer = setTimeout(async () => {
-        await pollQuotaStatus(states, config!);
+        await pollQuotaStatus(states, config!, ctxRef);
+        for (const state of states) {
+          syncResetTimers(state, config!, resetTimers, timerDeps());
+        }
         updateWidget();
         scheduleCheck();
       }, intervalMs);
     };
 
-    await pollQuotaStatus(states, config!);
+    await pollQuotaStatus(states, config!, ctxRef);
+    resetTimers = scheduleResetTimers(states, config, timerDeps());
     scheduleCheck();
     const startProvider = ctx.model?.provider;
     if (startProvider === "anthropic" || startProvider === "openai-codex") {
@@ -132,6 +175,7 @@ export default function (pi: ExtensionAPI) {
       clearTimeout(checkTimer);
       checkTimer = null;
     }
+    clearResetTimers(resetTimers, (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   });
 
   pi.registerCommand("quota", {
@@ -149,18 +193,16 @@ export default function (pi: ExtensionAPI) {
 
 }
 
-async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig) {
+async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig, ctx?: ExtensionContext | null) {
   try {
     const auth = loadAuth();
     if (!auth) return;
 
-    const anthropicToken = auth.anthropic?.access;
-    const openaiToken = auth["openai-codex"]?.access;
-
-    if (anthropicToken) {
+    const anthropicAuth = await ensureAnthropicAccess(auth, ctx);
+    if (anthropicAuth?.access) {
       const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
         headers: {
-          "Authorization": `Bearer ${anthropicToken}`,
+          "Authorization": `Bearer ${anthropicAuth.access}`,
           "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
           "accept": "application/json",
         },
@@ -168,11 +210,9 @@ async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig) {
 
       if (response.ok) {
         const data = await response.json() as any;
-        
         const fiveHour = data.five_hour;
         const sevenDay = data.seven_day;
-        
-        await updateState(states, config, {
+        updateState(states, {
           provider: "anthropic",
           fiveHourRemaining: fiveHour ? Math.round(100 - (fiveHour.utilization ?? 0)) : null,
           fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
@@ -180,13 +220,16 @@ async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig) {
           sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
           lastUpdated: new Date(),
         });
+      } else {
+        console.error(`pi-quota: Anthropic usage request failed: ${response.status}`);
       }
     }
 
-    if (openaiToken) {
+    const openaiAuth = await ensureOpenAIAccess(auth, ctx);
+    if (openaiAuth?.access) {
       const response = await fetch("https://chatgpt.com/backend-api/wham/usage", {
         headers: {
-          "Authorization": `Bearer ${openaiToken}`,
+          "Authorization": `Bearer ${openaiAuth.access}`,
           "User-Agent": "pi-quota/1.0",
           "accept": "application/json",
         },
@@ -194,12 +237,10 @@ async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig) {
 
       if (response.ok) {
         const data = await response.json() as any;
-        
         if (data.rate_limit) {
           const primary = data.rate_limit.primary_window;
           const secondary = data.rate_limit.secondary_window;
-          
-          await updateState(states, config, {
+          updateState(states, {
             provider: "openai",
             fiveHourRemaining: primary ? Math.round(100 - (primary.used_percent ?? 0)) : null,
             fiveHourReset: primary?.reset_at ? new Date(primary.reset_at * 1000) : null,
@@ -208,6 +249,8 @@ async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig) {
             lastUpdated: new Date(),
           });
         }
+      } else {
+        console.error(`pi-quota: OpenAI Codex usage request failed: ${response.status}`);
       }
     }
   } catch (error) {
@@ -215,16 +258,12 @@ async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig) {
   }
 }
 
-async function updateState(states: QuotaState[], config: QuotaConfig, parsed: QuotaState) {
+function updateState(states: QuotaState[], parsed: QuotaState) {
   const existing = states.find((s) => s.provider === parsed.provider);
-
   if (!existing) {
     states.push(parsed);
     return;
   }
-
-  await detectAndNotifyReset(config, parsed.provider, "5h", existing.fiveHourReset, parsed.fiveHourReset, parsed);
-  await detectAndNotifyReset(config, parsed.provider, "7d", existing.sevenDayReset, parsed.sevenDayReset, parsed);
 
   existing.fiveHourRemaining = parsed.fiveHourRemaining;
   existing.fiveHourReset = parsed.fiveHourReset;
@@ -233,20 +272,68 @@ async function updateState(states: QuotaState[], config: QuotaConfig, parsed: Qu
   existing.lastUpdated = parsed.lastUpdated;
 }
 
-async function detectAndNotifyReset(
-  config: QuotaConfig,
-  provider: "anthropic" | "openai",
-  window: "5h" | "7d",
-  oldReset: Date | null,
-  newReset: Date | null,
-  newState: QuotaState,
-) {
-  if (!oldReset || !newReset) return;
-  if (newReset.getTime() <= oldReset.getTime()) return;
+async function ensureAnthropicAccess(auth: AuthFile, ctx?: ExtensionContext | null) {
+  const record = auth.anthropic;
+  if (!record?.refresh) return record;
+  if (record.expires && record.expires > Date.now() + 60_000 && record.access) return record;
 
-  const label = provider === "openai" ? "openai-codex" : provider;
-  const message = `🔄 ${label} ${window} quota reset\n\n${formatQuotaStatus([newState])}`;
-  await sendTelegram(config, message);
+  const response = await fetch("https://api.anthropic.com/v1/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: record.refresh,
+      client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    }),
+  });
+
+  if (!response.ok) {
+    console.error(`pi-quota: Anthropic token refresh failed: ${response.status}`);
+    return record;
+  }
+
+  const data = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+  auth.anthropic = {
+    ...record,
+    access: data.access_token ?? record.access,
+    refresh: data.refresh_token ?? record.refresh,
+    expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
+  };
+  saveAuth(auth);
+  ctx?.ui.notify("pi-quota: refreshed Anthropic auth", "info");
+  return auth.anthropic;
+}
+
+async function ensureOpenAIAccess(auth: AuthFile, ctx?: ExtensionContext | null) {
+  const record = auth["openai-codex"];
+  if (!record?.refresh) return record;
+  if (record.expires && record.expires > Date.now() + 60_000 && record.access) return record;
+
+  const response = await fetch("https://auth.openai.com/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: record.refresh,
+      client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
+    }),
+  });
+
+  if (!response.ok) {
+    console.error(`pi-quota: OpenAI Codex token refresh failed: ${response.status}`);
+    return record;
+  }
+
+  const data = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+  auth["openai-codex"] = {
+    ...record,
+    access: data.access_token ?? record.access,
+    refresh: data.refresh_token ?? record.refresh,
+    expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
+  };
+  saveAuth(auth);
+  ctx?.ui.notify("pi-quota: refreshed OpenAI Codex auth", "info");
+  return auth["openai-codex"];
 }
 
 async function sendTelegram(config: QuotaConfig, text: string): Promise<boolean> {
