@@ -140,8 +140,9 @@ One compact line per provider, e.g.:
 openai-codex: 7d: 89% left (1d 13h), 5h: 30% left (4h 39m)
 ```
 
-The same `formatQuotaStatus` output is reused for the widget, the `/quota`
-command, and Telegram messages.
+The `/quota` command and Telegram messages use this `formatQuotaStatus` output.
+The widget calls it with the provider prefix suppressed (pi already shows the
+active provider), so it renders just `7d: ... , 5h: ...`.
 
 ## Dependencies
 

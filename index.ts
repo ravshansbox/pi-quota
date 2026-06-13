@@ -101,7 +101,7 @@ function formatResetTime(reset: Date): string {
   return `${minutes}m`;
 }
 
-function formatQuotaStatus(states: QuotaState[]): string {
+function formatQuotaStatus(states: QuotaState[], showProvider = true): string {
   if (states.length === 0) return "No quota data collected yet.";
 
   return states
@@ -119,7 +119,7 @@ function formatQuotaStatus(states: QuotaState[]): string {
         parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
       }
 
-      return `${provider}: ${parts.join(", ")}`;
+      return showProvider ? `${provider}: ${parts.join(", ")}` : parts.join(", ");
     })
     .join("\n");
 }
@@ -271,7 +271,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const text = formatQuotaStatus([state]);
+    const text = formatQuotaStatus([state], false);
     ctxRef.ui.setWidget("pi-quota", [text]);
   }
 
