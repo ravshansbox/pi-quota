@@ -72,12 +72,12 @@ export function formatQuotaStatus(states: QuotaState[]): string {
 
     if (state.fiveHourRemaining !== null) {
       const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
-      lines.push(`• 5 Hour: ${state.fiveHourRemaining}% remaining (resets ${resetStr})`);
+      lines.push(`• 5h: ${state.fiveHourRemaining}% remaining (resets ${resetStr})`);
     }
 
     if (state.sevenDayRemaining !== null) {
       const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
-      lines.push(`• 7 Day: ${state.sevenDayRemaining}% remaining (resets ${resetStr})`);
+      lines.push(`• week: ${state.sevenDayRemaining}% remaining (resets ${resetStr})`);
     }
 
     lines.push("");
