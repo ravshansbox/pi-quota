@@ -70,14 +70,14 @@ export function formatQuotaStatus(states: QuotaState[]): string {
     const provider = state.provider === "openai" ? "openai-codex" : state.provider;
     lines.push(`${provider}:`);
 
-    if (state.fiveHourRemaining !== null) {
-      const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
-      lines.push(`• 5h: ${state.fiveHourRemaining}% remaining (resets ${resetStr})`);
-    }
-
     if (state.sevenDayRemaining !== null) {
       const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
       lines.push(`• week: ${state.sevenDayRemaining}% remaining (resets ${resetStr})`);
+    }
+
+    if (state.fiveHourRemaining !== null) {
+      const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
+      lines.push(`• 5h: ${state.fiveHourRemaining}% remaining (resets ${resetStr})`);
     }
 
     lines.push("");
