@@ -47,6 +47,34 @@ type TelegramUpdate = {
 
 type ResetWindow = "5h" | "7d";
 
+type OAuthTokenResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+};
+
+type AnthropicUsageWindow = {
+  utilization?: number;
+  resets_at?: string;
+};
+
+type AnthropicUsageResponse = {
+  five_hour?: AnthropicUsageWindow;
+  seven_day?: AnthropicUsageWindow;
+};
+
+type OpenAIUsageWindow = {
+  used_percent?: number;
+  reset_at?: number;
+};
+
+type OpenAIUsageResponse = {
+  rate_limit?: {
+    primary_window?: OpenAIUsageWindow;
+    secondary_window?: OpenAIUsageWindow;
+  };
+};
+
 type TimerRecord = {
   resetAt: number;
   handle: ReturnType<typeof setTimeout>;
@@ -347,7 +375,7 @@ export default function (pi: ExtensionAPI) {
       return record;
     }
 
-    const data = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+    const data = await response.json() as OAuthTokenResponse;
     auth.anthropic = {
       ...record,
       access: data.access_token ?? record.access,
@@ -379,7 +407,7 @@ export default function (pi: ExtensionAPI) {
       return record;
     }
 
-    const data = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+    const data = await response.json() as OAuthTokenResponse;
     auth["openai-codex"] = {
       ...record,
       access: data.access_token ?? record.access,
@@ -407,7 +435,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         if (response.ok) {
-          const data = await response.json() as any;
+          const data = await response.json() as AnthropicUsageResponse;
           const fiveHour = data.five_hour;
           const sevenDay = data.seven_day;
           updateState({
@@ -434,7 +462,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         if (response.ok) {
-          const data = await response.json() as any;
+          const data = await response.json() as OpenAIUsageResponse;
           if (data.rate_limit) {
             const primary = data.rate_limit.primary_window;
             const secondary = data.rate_limit.secondary_window;
