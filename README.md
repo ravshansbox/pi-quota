@@ -25,6 +25,7 @@ Pi extension that tracks Anthropic and OpenAI API quota usage and sends Telegram
 |-------|----------|---------|-------------|
 | `botToken` | Yes | — | Telegram Bot API token |
 | `chatId` | Yes | — | Telegram chat ID |
+| `pollIntervalMs` | No | `600000` | Interval in ms between reset-time checks (minimum 60000) |
 
 ## Commands
 
@@ -33,9 +34,9 @@ Pi extension that tracks Anthropic and OpenAI API quota usage and sends Telegram
 
 ## How It Works
 
-1. Intercepts rate-limit headers from Anthropic/OpenAI API responses during normal usage
-2. Tracks quota resets passively — no background polling required
-3. Schedules Telegram notifications to fire when quota reset times arrive
+1. Extracts rate-limit headers passively from Anthropic/OpenAI API responses during normal usage — no API calls made just for headers
+2. A periodic timer checks whether any tracked reset times have arrived (interval configurable via `pollIntervalMs`, default 10 minutes)
+3. When a reset time is reached, sends a Telegram notification with the quota status
 
 ## Environment Variables
 
