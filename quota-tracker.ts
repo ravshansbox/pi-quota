@@ -13,54 +13,6 @@ export interface QuotaState {
   lastUpdated: Date;
 }
 
-export function parseAnthropicHeaders(headers: Record<string, string>): Partial<QuotaState> | null {
-  const remaining = headers["anthropic-ratelimit-requests-remaining"];
-  const reset = headers["anthropic-ratelimit-requests-reset"];
-  const tokensRemaining = headers["anthropic-ratelimit-tokens-remaining"];
-  const tokensReset = headers["anthropic-ratelimit-tokens-reset"];
-
-  if (!remaining && !tokensRemaining) return null;
-
-  const parsedRemaining = remaining ? parseInt(remaining, 10) : null;
-  const parsedTokens = tokensRemaining ? parseInt(tokensRemaining, 10) : null;
-
-  const requestsReset = reset ? new Date(reset) : null;
-  const tokenReset = tokensReset ? new Date(tokensReset) : null;
-
-  return {
-    provider: "anthropic",
-    requestsRemaining: parsedRemaining !== null && !isNaN(parsedRemaining) ? parsedRemaining : null,
-    requestsReset: requestsReset && !isNaN(requestsReset.getTime()) ? requestsReset : null,
-    tokensRemaining: parsedTokens !== null && !isNaN(parsedTokens) ? parsedTokens : null,
-    tokensReset: tokenReset && !isNaN(tokenReset.getTime()) ? tokenReset : null,
-    lastUpdated: new Date(),
-  };
-}
-
-export function parseOpenAIHeaders(headers: Record<string, string>): Partial<QuotaState> | null {
-  const remaining = headers["x-ratelimit-remaining-requests"];
-  const reset = headers["x-ratelimit-reset-requests"];
-  const tokensRemaining = headers["x-ratelimit-remaining-tokens"];
-  const tokensReset = headers["x-ratelimit-reset-tokens"];
-
-  if (!remaining && !tokensRemaining) return null;
-
-  const parsedRemaining = remaining ? parseInt(remaining, 10) : null;
-  const parsedTokens = tokensRemaining ? parseInt(tokensRemaining, 10) : null;
-
-  const requestsReset = reset ? new Date(reset) : null;
-  const tokenReset = tokensReset ? new Date(tokensReset) : null;
-
-  return {
-    provider: "openai",
-    requestsRemaining: parsedRemaining !== null && !isNaN(parsedRemaining) ? parsedRemaining : null,
-    requestsReset: requestsReset && !isNaN(requestsReset.getTime()) ? requestsReset : null,
-    tokensRemaining: parsedTokens !== null && !isNaN(parsedTokens) ? parsedTokens : null,
-    tokensReset: tokenReset && !isNaN(tokenReset.getTime()) ? tokenReset : null,
-    lastUpdated: new Date(),
-  };
-}
-
 function renderBar(percent: number): string {
   const width = 20;
   const filled = Math.round((percent / 100) * width);
@@ -108,8 +60,3 @@ export function formatResetTime(reset: Date): string {
   return `${minutes}m`;
 }
 
-export function formatTokens(tokens: number): string {
-  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}K`;
-  return tokens.toString();
-}

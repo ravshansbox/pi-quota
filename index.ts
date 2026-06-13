@@ -5,8 +5,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   type QuotaConfig,
   type QuotaState,
-  parseAnthropicHeaders,
-  parseOpenAIHeaders,
   formatQuotaStatus,
   formatResetTime,
 } from "./quota-tracker";
@@ -103,14 +101,13 @@ export default function (pi: ExtensionAPI) {
 
     const scheduleCheck = () => {
       checkTimer = setTimeout(async () => {
-        await pollQuotaStatus(states);
-        await checkQuota(states, config!);
+        await pollQuotaStatus(states, config!);
         updateWidget();
         scheduleCheck();
       }, intervalMs);
     };
 
-    await pollQuotaStatus(states);
+    await pollQuotaStatus(states, config!);
     scheduleCheck();
     const startProvider = ctx.model?.provider;
     if (startProvider === "anthropic" || startProvider === "openai-codex") {
@@ -137,34 +134,6 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("after_provider_response", async (event, ctx) => {
-    const headers = event.headers as Record<string, string>;
-    const provider = detectProvider(event);
-
-    if (!provider) return;
-
-    let parsed: Partial<QuotaState> | null = null;
-
-    if (provider === "anthropic") {
-      parsed = parseAnthropicHeaders(headers);
-    } else if (provider === "openai") {
-      parsed = parseOpenAIHeaders(headers);
-    }
-
-    if (!parsed) return;
-
-    const existing = states.find((s) => s.provider === provider);
-    if (existing) {
-      if (parsed.requestsRemaining !== undefined) existing.requestsRemaining = parsed.requestsRemaining;
-      if (parsed.requestsReset !== undefined) existing.requestsReset = parsed.requestsReset;
-      if (parsed.tokensRemaining !== undefined) existing.tokensRemaining = parsed.tokensRemaining;
-      if (parsed.tokensReset !== undefined) existing.tokensReset = parsed.tokensReset;
-      existing.lastUpdated = parsed.lastUpdated ?? new Date();
-    } else {
-      states.push(parsed as QuotaState);
-    }
-  });
-
   pi.registerCommand("quota", {
     description: "Show current quota status",
     handler: async (_args, ctx) => {
@@ -180,14 +149,7 @@ export default function (pi: ExtensionAPI) {
 
 }
 
-function detectProvider(event: { headers: Record<string, string> }): "anthropic" | "openai" | null {
-  const headers = event.headers;
-  if (headers["anthropic-ratelimit-requests-remaining"]) return "anthropic";
-  if (headers["x-ratelimit-remaining-requests"]) return "openai";
-  return null;
-}
-
-async function pollQuotaStatus(states: QuotaState[]) {
+async function pollQuotaStatus(states: QuotaState[], config: QuotaConfig) {
   try {
     const auth = loadAuth();
     if (!auth) return;
@@ -210,7 +172,7 @@ async function pollQuotaStatus(states: QuotaState[]) {
         const fiveHour = data.five_hour;
         const sevenDay = data.seven_day;
         
-        updateState(states, {
+        await updateState(states, config, {
           provider: "anthropic",
           fiveHourRemaining: fiveHour ? Math.round(100 - (fiveHour.utilization ?? 0)) : null,
           fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
@@ -237,7 +199,7 @@ async function pollQuotaStatus(states: QuotaState[]) {
           const primary = data.rate_limit.primary_window;
           const secondary = data.rate_limit.secondary_window;
           
-          updateState(states, {
+          await updateState(states, config, {
             provider: "openai",
             fiveHourRemaining: primary ? Math.round(100 - (primary.used_percent ?? 0)) : null,
             fiveHourReset: primary?.reset_at ? new Date(primary.reset_at * 1000) : null,
@@ -253,38 +215,38 @@ async function pollQuotaStatus(states: QuotaState[]) {
   }
 }
 
-function updateState(states: QuotaState[], parsed: Partial<QuotaState>) {
+async function updateState(states: QuotaState[], config: QuotaConfig, parsed: QuotaState) {
   const existing = states.find((s) => s.provider === parsed.provider);
-  if (existing) {
-    if (parsed.fiveHourRemaining !== undefined) existing.fiveHourRemaining = parsed.fiveHourRemaining;
-    if (parsed.fiveHourReset !== undefined) existing.fiveHourReset = parsed.fiveHourReset;
-    if (parsed.sevenDayRemaining !== undefined) existing.sevenDayRemaining = parsed.sevenDayRemaining;
-    if (parsed.sevenDayReset !== undefined) existing.sevenDayReset = parsed.sevenDayReset;
-    existing.lastUpdated = parsed.lastUpdated ?? new Date();
-  } else {
-    states.push(parsed as QuotaState);
+
+  if (!existing) {
+    states.push(parsed);
+    return;
   }
+
+  await detectAndNotifyReset(config, parsed.provider, "5h", existing.fiveHourReset, parsed.fiveHourReset, parsed);
+  await detectAndNotifyReset(config, parsed.provider, "7d", existing.sevenDayReset, parsed.sevenDayReset, parsed);
+
+  existing.fiveHourRemaining = parsed.fiveHourRemaining;
+  existing.fiveHourReset = parsed.fiveHourReset;
+  existing.sevenDayRemaining = parsed.sevenDayRemaining;
+  existing.sevenDayReset = parsed.sevenDayReset;
+  existing.lastUpdated = parsed.lastUpdated;
 }
 
-async function checkQuota(states: QuotaState[], config: QuotaConfig) {
-  const now = new Date();
+async function detectAndNotifyReset(
+  config: QuotaConfig,
+  provider: "anthropic" | "openai",
+  window: "5h" | "7d",
+  oldReset: Date | null,
+  newReset: Date | null,
+  newState: QuotaState,
+) {
+  if (!oldReset || !newReset) return;
+  if (newReset.getTime() <= oldReset.getTime()) return;
 
-  for (const state of states) {
-    const fiveHourReset = state.fiveHourReset;
-    const sevenDayReset = state.sevenDayReset;
-
-    if (fiveHourReset && fiveHourReset <= now) {
-      const message = `🔄 5 Hour Quota Reset\n\n${formatQuotaStatus([state])}`;
-      const sent = await sendTelegram(config, message);
-      if (sent) state.fiveHourReset = null;
-    }
-
-    if (sevenDayReset && sevenDayReset <= now) {
-      const message = `🔄 7 Day Quota Reset\n\n${formatQuotaStatus([state])}`;
-      const sent = await sendTelegram(config, message);
-      if (sent) state.sevenDayReset = null;
-    }
-  }
+  const label = provider === "openai" ? "openai-codex" : provider;
+  const message = `🔄 ${label} ${window} quota reset\n\n${formatQuotaStatus([newState])}`;
+  await sendTelegram(config, message);
 }
 
 async function sendTelegram(config: QuotaConfig, text: string): Promise<boolean> {
