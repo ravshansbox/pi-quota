@@ -64,10 +64,10 @@ export function parseOpenAIHeaders(headers: Record<string, string>): Partial<Quo
 export function formatQuotaStatus(states: QuotaState[]): string {
   if (states.length === 0) return "No quota data collected yet.";
 
-  const lines: string[] = ["📊 Quota Status", ""];
+  const lines: string[] = ["quota", ""];
 
   for (const state of states) {
-    const provider = state.provider.charAt(0).toUpperCase() + state.provider.slice(1);
+    const provider = state.provider === "openai" ? "openai-codex" : state.provider;
     lines.push(`${provider}:`);
 
     if (state.fiveHourRemaining !== null) {
