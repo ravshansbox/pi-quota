@@ -79,12 +79,12 @@ export function formatQuotaStatus(states: QuotaState[]): string {
 
     if (state.sevenDayRemaining !== null) {
       const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
-      lines.push(`  week  ${renderBar(state.sevenDayRemaining)} ${state.sevenDayRemaining}%  resets ${resetStr}`);
+      lines.push(`  week  ${renderBar(state.sevenDayRemaining)} ${state.sevenDayRemaining}%  (${resetStr})`);
     }
 
     if (state.fiveHourRemaining !== null) {
       const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
-      lines.push(`  5h    ${renderBar(state.fiveHourRemaining)} ${state.fiveHourRemaining}%  resets ${resetStr}`);
+      lines.push(`  5h    ${renderBar(state.fiveHourRemaining)} ${state.fiveHourRemaining}%  (${resetStr})`);
     }
 
     lines.push("");
@@ -103,9 +103,9 @@ function formatResetTime(reset: Date): string {
   const hours = Math.floor((diff % 86400000) / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
 
-  if (days > 0) return `in ${days}d ${hours}h`;
-  if (hours > 0) return `in ${hours}h ${minutes}m`;
-  return `in ${minutes}m`;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 export function formatTokens(tokens: number): string {
