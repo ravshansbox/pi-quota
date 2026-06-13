@@ -8,7 +8,6 @@ import {
   parseAnthropicHeaders,
   parseOpenAIHeaders,
   formatQuotaStatus,
-  formatTokens,
 } from "./quota-tracker";
 
 function loadConfig(): QuotaConfig | null {
@@ -28,6 +27,7 @@ export default function (pi: ExtensionAPI) {
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
 
   pi.on("session_start", async (_event, ctx) => {
+    states.length = 0;
     config = loadConfig();
 
     if (!config) {
@@ -36,7 +36,17 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (!config.botToken || !config.chatId) {
-      ctx.ui.notify("pi-quota: botToken and chatId required", "warning");
+      ctx.ui.notify("pi-quota: botToken and chatId required in settings.json", "warning");
+      return;
+    }
+
+    if (typeof config.botToken !== "string" || typeof config.chatId !== "string") {
+      ctx.ui.notify("pi-quota: botToken and chatId must be strings", "error");
+      return;
+    }
+
+    if (config.pollIntervalMs !== undefined && (typeof config.pollIntervalMs !== "number" || config.pollIntervalMs < 60000)) {
+      ctx.ui.notify("pi-quota: pollIntervalMs must be >= 60000 (1 minute)", "error");
       return;
     }
 
@@ -91,8 +101,26 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("quota", {
     description: "Show current quota status",
     handler: async (_args, ctx) => {
+      if (states.length === 0) {
+        ctx.ui.notify("No quota data collected yet. Waiting for API responses...", "info");
+        return;
+      }
+
       const status = formatQuotaStatus(states);
       ctx.ui.notify(status, "info");
+    },
+  });
+
+  pi.registerCommand("quota-test", {
+    description: "Test Telegram notification",
+    handler: async (_args, ctx) => {
+      if (!config) {
+        ctx.ui.notify("pi-quota: No config found", "error");
+        return;
+      }
+
+      await sendTelegram(config, "🧪 pi-quota test message");
+      ctx.ui.notify("Test message sent to Telegram", "info");
     },
   });
 }
@@ -113,7 +141,7 @@ async function checkQuota(states: QuotaState[], config: QuotaConfig) {
     if (!resetTime) continue;
 
     if (resetTime <= now) {
-      const message = `🔄 Quota Reset\n\n${formatProviderStatus(state)}`;
+      const message = `🔄 Quota Reset\n\n${formatQuotaStatus([state])}`;
       const sent = await sendTelegram(config, message);
 
       if (sent) {
@@ -122,21 +150,6 @@ async function checkQuota(states: QuotaState[], config: QuotaConfig) {
       }
     }
   }
-}
-
-function formatProviderStatus(state: QuotaState): string {
-  const provider = state.provider.charAt(0).toUpperCase() + state.provider.slice(1);
-  const lines: string[] = [`${provider}:`];
-
-  if (state.requestsRemaining !== null) {
-    lines.push(`• Requests: ${state.requestsRemaining} remaining`);
-  }
-
-  if (state.tokensRemaining !== null) {
-    lines.push(`• Tokens: ${formatTokens(state.tokensRemaining)} remaining`);
-  }
-
-  return lines.join("\n");
 }
 
 async function sendTelegram(config: QuotaConfig, text: string): Promise<boolean> {
