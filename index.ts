@@ -21,6 +21,16 @@ function loadConfig(): QuotaConfig | null {
   }
 }
 
+function loadAuth(): Record<string, { type?: string; access?: string; key?: string }> | null {
+  try {
+    const authPath = join(homedir(), ".pi", "agent", "auth.json");
+    const raw = readFileSync(authPath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   const states: QuotaState[] = [];
   let config: QuotaConfig | null = null;
@@ -136,14 +146,17 @@ function detectProvider(event: { headers: Record<string, string> }): "anthropic"
 
 async function pollQuotaStatus(states: QuotaState[]) {
   try {
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    const openaiKey = process.env.OPENAI_API_KEY;
+    const auth = loadAuth();
+    if (!auth) return;
 
-    if (anthropicKey) {
+    const anthropicToken = auth.anthropic?.access;
+    const openaiToken = auth["openai-codex"]?.access;
+
+    if (anthropicToken) {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
-          "x-api-key": anthropicKey,
+          "Authorization": `Bearer ${anthropicToken}`,
           "anthropic-version": "2023-06-01",
           "content-type": "application/json",
         },
@@ -162,11 +175,11 @@ async function pollQuotaStatus(states: QuotaState[]) {
       }
     }
 
-    if (openaiKey) {
+    if (openaiToken) {
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${openaiKey}`,
+          Authorization: `Bearer ${openaiToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
