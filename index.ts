@@ -11,13 +11,6 @@ import {
   formatResetTime,
 } from "./quota-tracker";
 
-function renderBar(percent: number): string {
-  const width = 16;
-  const filled = Math.round((percent / 100) * width);
-  const empty = width - filled;
-  return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;
-}
-
 function loadConfig(): QuotaConfig | null {
   try {
     const settingsPath = join(homedir(), ".pi", "agent", "settings.json");
@@ -57,20 +50,20 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const lines: string[] = [];
+    const parts: string[] = [];
     
     if (state.sevenDayRemaining !== null) {
       const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "?";
-      lines.push(`week ${renderBar(state.sevenDayRemaining)} ${state.sevenDayRemaining}% (${resetStr})`);
+      parts.push(`7d: ${state.sevenDayRemaining}% left (${resetStr})`);
     }
     
     if (state.fiveHourRemaining !== null) {
       const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "?";
-      lines.push(`5h   ${renderBar(state.fiveHourRemaining)} ${state.fiveHourRemaining}% (${resetStr})`);
+      parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
     }
     
-    if (lines.length > 0) {
-      ctxRef.ui.setWidget("pi-quota", lines);
+    if (parts.length > 0) {
+      ctxRef.ui.setWidget("pi-quota", [parts.join(", ")]);
     } else {
       ctxRef.ui.setWidget("pi-quota", undefined);
     }
