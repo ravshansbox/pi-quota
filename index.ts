@@ -40,8 +40,14 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    await pollQuotaStatus(pi, states);
+
     const intervalMs = config.pollIntervalMs ?? 600000;
-    pollTimer = setInterval(() => checkQuota(pi, states, config!), intervalMs);
+    pollTimer = setInterval(() => {
+      pollQuotaStatus(pi, states);
+      checkQuota(pi, states, config!);
+    }, intervalMs);
+
     ctx.ui.notify("pi-quota: tracking started", "info");
   });
 
@@ -96,6 +102,73 @@ function detectProvider(event: { headers: Record<string, string> }): "anthropic"
   return null;
 }
 
+async function pollQuotaStatus(pi: ExtensionAPI, states: QuotaState[]) {
+  try {
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+
+    if (anthropicKey) {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+
+      const headers = Object.fromEntries(response.headers.entries());
+      const parsed = parseAnthropicHeaders(headers);
+
+      if (parsed) {
+        updateState(states, parsed);
+      }
+    }
+
+    if (openaiKey) {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openaiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+
+      const headers = Object.fromEntries(response.headers.entries());
+      const parsed = parseOpenAIHeaders(headers);
+
+      if (parsed) {
+        updateState(states, parsed);
+      }
+    }
+  } catch (error) {
+    console.error("pi-quota: Poll error:", error);
+  }
+}
+
+function updateState(states: QuotaState[], parsed: Partial<QuotaState>) {
+  const existing = states.find((s) => s.provider === parsed.provider);
+  if (existing) {
+    if (parsed.requestsRemaining !== undefined) existing.requestsRemaining = parsed.requestsRemaining;
+    if (parsed.requestsReset !== undefined) existing.requestsReset = parsed.requestsReset;
+    if (parsed.tokensRemaining !== undefined) existing.tokensRemaining = parsed.tokensRemaining;
+    if (parsed.tokensReset !== undefined) existing.tokensReset = parsed.tokensReset;
+    existing.lastUpdated = parsed.lastUpdated ?? new Date();
+  } else {
+    states.push(parsed as QuotaState);
+  }
+}
+
 async function checkQuota(_pi: ExtensionAPI, states: QuotaState[], config: QuotaConfig) {
   const now = new Date();
 
@@ -106,10 +179,12 @@ async function checkQuota(_pi: ExtensionAPI, states: QuotaState[], config: Quota
 
     if (resetTime <= now) {
       const message = `🔄 Quota Reset\n\n${formatProviderStatus(state)}`;
-      await sendTelegram(config, message);
+      const sent = await sendTelegram(config, message);
 
-      state.requestsReset = null;
-      state.tokensReset = null;
+      if (sent) {
+        state.requestsReset = null;
+        state.tokensReset = null;
+      }
     }
   }
 }
@@ -129,7 +204,7 @@ function formatProviderStatus(state: QuotaState): string {
   return lines.join("\n");
 }
 
-async function sendTelegram(config: QuotaConfig, text: string) {
+async function sendTelegram(config: QuotaConfig, text: string): Promise<boolean> {
   const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
 
   try {
@@ -144,8 +219,12 @@ async function sendTelegram(config: QuotaConfig, text: string) {
 
     if (!response.ok) {
       console.error(`pi-quota: Telegram API error: ${response.status}`);
+      return false;
     }
+
+    return true;
   } catch (error) {
     console.error(`pi-quota: Failed to send Telegram message:`, error);
+    return false;
   }
 }

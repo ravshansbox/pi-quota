@@ -1,7 +1,7 @@
 export interface QuotaConfig {
   botToken: string;
   chatId: string;
-  pollIntervalMs: number;
+  pollIntervalMs?: number;
 }
 
 export interface QuotaState {
@@ -24,12 +24,15 @@ export function parseAnthropicHeaders(headers: Record<string, string>): Partial<
   const parsedRemaining = remaining ? parseInt(remaining, 10) : null;
   const parsedTokens = tokensRemaining ? parseInt(tokensRemaining, 10) : null;
 
+  const requestsReset = reset ? new Date(reset) : null;
+  const tokenReset = tokensReset ? new Date(tokensReset) : null;
+
   return {
     provider: "anthropic",
     requestsRemaining: parsedRemaining !== null && !isNaN(parsedRemaining) ? parsedRemaining : null,
-    requestsReset: reset ? new Date(reset) : null,
+    requestsReset: requestsReset && !isNaN(requestsReset.getTime()) ? requestsReset : null,
     tokensRemaining: parsedTokens !== null && !isNaN(parsedTokens) ? parsedTokens : null,
-    tokensReset: tokensReset ? new Date(tokensReset) : null,
+    tokensReset: tokenReset && !isNaN(tokenReset.getTime()) ? tokenReset : null,
     lastUpdated: new Date(),
   };
 }
@@ -45,12 +48,15 @@ export function parseOpenAIHeaders(headers: Record<string, string>): Partial<Quo
   const parsedRemaining = remaining ? parseInt(remaining, 10) : null;
   const parsedTokens = tokensRemaining ? parseInt(tokensRemaining, 10) : null;
 
+  const requestsReset = reset ? new Date(reset) : null;
+  const tokenReset = tokensReset ? new Date(tokensReset) : null;
+
   return {
     provider: "openai",
     requestsRemaining: parsedRemaining !== null && !isNaN(parsedRemaining) ? parsedRemaining : null,
-    requestsReset: reset ? new Date(reset) : null,
+    requestsReset: requestsReset && !isNaN(requestsReset.getTime()) ? requestsReset : null,
     tokensRemaining: parsedTokens !== null && !isNaN(parsedTokens) ? parsedTokens : null,
-    tokensReset: tokensReset ? new Date(tokensReset) : null,
+    tokensReset: tokenReset && !isNaN(tokenReset.getTime()) ? tokenReset : null,
     lastUpdated: new Date(),
   };
 }
