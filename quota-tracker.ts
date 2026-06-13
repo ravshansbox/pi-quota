@@ -13,36 +13,27 @@ export interface QuotaState {
   lastUpdated: Date;
 }
 
-function renderBar(percent: number): string {
-  const width = 20;
-  const filled = Math.round((percent / 100) * width);
-  const empty = width - filled;
-  return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;
-}
-
 export function formatQuotaStatus(states: QuotaState[]): string {
   if (states.length === 0) return "No quota data collected yet.";
 
-  const lines: string[] = [];
+  return states
+    .map((state) => {
+      const provider = state.provider === "openai" ? "openai-codex" : state.provider;
+      const parts: string[] = [];
 
-  for (const state of states) {
-    const provider = state.provider === "openai" ? "openai-codex" : state.provider;
-    lines.push(`${provider}:`);
+      if (state.sevenDayRemaining !== null) {
+        const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
+        parts.push(`7d: ${state.sevenDayRemaining}% left (${resetStr})`);
+      }
 
-    if (state.sevenDayRemaining !== null) {
-      const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
-      lines.push(`  7d ${renderBar(state.sevenDayRemaining)} ${state.sevenDayRemaining}% (${resetStr})`);
-    }
+      if (state.fiveHourRemaining !== null) {
+        const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
+        parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
+      }
 
-    if (state.fiveHourRemaining !== null) {
-      const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
-      lines.push(`  5h ${renderBar(state.fiveHourRemaining)} ${state.fiveHourRemaining}% (${resetStr})`);
-    }
-
-    lines.push("");
-  }
-
-  return lines.join("\n");
+      return `${provider}: ${parts.join(", ")}`;
+    })
+    .join("\n");
 }
 
 export function formatResetTime(reset: Date): string {
