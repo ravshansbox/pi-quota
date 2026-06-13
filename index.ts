@@ -54,13 +54,15 @@ export default function (pi: ExtensionAPI) {
 
     const scheduleCheck = () => {
       checkTimer = setTimeout(async () => {
+        await pollQuotaStatus(states);
         await checkQuota(states, config!);
         scheduleCheck();
       }, intervalMs);
     };
 
+    await pollQuotaStatus(states);
     scheduleCheck();
-    ctx.ui.notify("pi-quota: tracking started (passive)", "info");
+    ctx.ui.notify("pi-quota: tracking started", "info");
   });
 
   pi.on("session_shutdown", async () => {
@@ -130,6 +132,73 @@ function detectProvider(event: { headers: Record<string, string> }): "anthropic"
   if (headers["anthropic-ratelimit-requests-remaining"]) return "anthropic";
   if (headers["x-ratelimit-remaining-requests"]) return "openai";
   return null;
+}
+
+async function pollQuotaStatus(states: QuotaState[]) {
+  try {
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+
+    if (anthropicKey) {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+
+      const headers = Object.fromEntries(response.headers.entries());
+      const parsed = parseAnthropicHeaders(headers);
+
+      if (parsed) {
+        updateState(states, parsed);
+      }
+    }
+
+    if (openaiKey) {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openaiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+
+      const headers = Object.fromEntries(response.headers.entries());
+      const parsed = parseOpenAIHeaders(headers);
+
+      if (parsed) {
+        updateState(states, parsed);
+      }
+    }
+  } catch (error) {
+    console.error("pi-quota: Poll error:", error);
+  }
+}
+
+function updateState(states: QuotaState[], parsed: Partial<QuotaState>) {
+  const existing = states.find((s) => s.provider === parsed.provider);
+  if (existing) {
+    if (parsed.requestsRemaining !== undefined) existing.requestsRemaining = parsed.requestsRemaining;
+    if (parsed.requestsReset !== undefined) existing.requestsReset = parsed.requestsReset;
+    if (parsed.tokensRemaining !== undefined) existing.tokensRemaining = parsed.tokensRemaining;
+    if (parsed.tokensReset !== undefined) existing.tokensReset = parsed.tokensReset;
+    existing.lastUpdated = parsed.lastUpdated ?? new Date();
+  } else {
+    states.push(parsed as QuotaState);
+  }
 }
 
 async function checkQuota(states: QuotaState[], config: QuotaConfig) {
