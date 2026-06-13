@@ -92,9 +92,11 @@ function formatResetTime(reset: Date): string {
 
   if (diff <= 0) return "now";
 
-  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
 
+  if (days > 0) return `in ${days}d ${hours}h`;
   if (hours > 0) return `in ${hours}h ${minutes}m`;
   return `in ${minutes}m`;
 }
