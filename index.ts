@@ -8,6 +8,7 @@ import {
   parseAnthropicHeaders,
   parseOpenAIHeaders,
   formatQuotaStatus,
+  formatTokens,
 } from "./quota-tracker";
 
 function loadConfig(): QuotaConfig | null {
@@ -69,7 +70,11 @@ export default function (pi: ExtensionAPI) {
 
     const existing = states.find((s) => s.provider === provider);
     if (existing) {
-      Object.assign(existing, parsed);
+      if (parsed.requestsRemaining !== undefined) existing.requestsRemaining = parsed.requestsRemaining;
+      if (parsed.requestsReset !== undefined) existing.requestsReset = parsed.requestsReset;
+      if (parsed.tokensRemaining !== undefined) existing.tokensRemaining = parsed.tokensRemaining;
+      if (parsed.tokensReset !== undefined) existing.tokensReset = parsed.tokensReset;
+      existing.lastUpdated = parsed.lastUpdated ?? new Date();
     } else {
       states.push(parsed as QuotaState);
     }
@@ -91,26 +96,56 @@ function detectProvider(event: { headers: Record<string, string> }): "anthropic"
   return null;
 }
 
-async function checkQuota(pi: ExtensionAPI, states: QuotaState[], config: QuotaConfig) {
+async function checkQuota(_pi: ExtensionAPI, states: QuotaState[], config: QuotaConfig) {
+  const now = new Date();
+
   for (const state of states) {
-    const now = new Date();
     const resetTime = state.requestsReset ?? state.tokensReset;
 
-    if (resetTime && resetTime <= now) {
-      await sendTelegram(config, formatQuotaStatus([state]));
+    if (!resetTime) continue;
+
+    if (resetTime <= now) {
+      const message = `🔄 Quota Reset\n\n${formatProviderStatus(state)}`;
+      await sendTelegram(config, message);
+
+      state.requestsReset = null;
+      state.tokensReset = null;
     }
   }
+}
+
+function formatProviderStatus(state: QuotaState): string {
+  const provider = state.provider.charAt(0).toUpperCase() + state.provider.slice(1);
+  const lines: string[] = [`${provider}:`];
+
+  if (state.requestsRemaining !== null) {
+    lines.push(`• Requests: ${state.requestsRemaining} remaining`);
+  }
+
+  if (state.tokensRemaining !== null) {
+    lines.push(`• Tokens: ${formatTokens(state.tokensRemaining)} remaining`);
+  }
+
+  return lines.join("\n");
 }
 
 async function sendTelegram(config: QuotaConfig, text: string) {
   const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
 
-  await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: config.chatId,
-      text,
-    }),
-  });
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: config.chatId,
+        text,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`pi-quota: Telegram API error: ${response.status}`);
+    }
+  } catch (error) {
+    console.error(`pi-quota: Failed to send Telegram message:`, error);
+  }
 }

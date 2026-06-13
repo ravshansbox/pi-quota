@@ -21,11 +21,14 @@ export function parseAnthropicHeaders(headers: Record<string, string>): Partial<
 
   if (!remaining && !tokensRemaining) return null;
 
+  const parsedRemaining = remaining ? parseInt(remaining, 10) : null;
+  const parsedTokens = tokensRemaining ? parseInt(tokensRemaining, 10) : null;
+
   return {
     provider: "anthropic",
-    requestsRemaining: remaining ? parseInt(remaining, 10) : null,
+    requestsRemaining: parsedRemaining !== null && !isNaN(parsedRemaining) ? parsedRemaining : null,
     requestsReset: reset ? new Date(reset) : null,
-    tokensRemaining: tokensRemaining ? parseInt(tokensRemaining, 10) : null,
+    tokensRemaining: parsedTokens !== null && !isNaN(parsedTokens) ? parsedTokens : null,
     tokensReset: tokensReset ? new Date(tokensReset) : null,
     lastUpdated: new Date(),
   };
@@ -39,11 +42,14 @@ export function parseOpenAIHeaders(headers: Record<string, string>): Partial<Quo
 
   if (!remaining && !tokensRemaining) return null;
 
+  const parsedRemaining = remaining ? parseInt(remaining, 10) : null;
+  const parsedTokens = tokensRemaining ? parseInt(tokensRemaining, 10) : null;
+
   return {
     provider: "openai",
-    requestsRemaining: remaining ? parseInt(remaining, 10) : null,
+    requestsRemaining: parsedRemaining !== null && !isNaN(parsedRemaining) ? parsedRemaining : null,
     requestsReset: reset ? new Date(reset) : null,
-    tokensRemaining: tokensRemaining ? parseInt(tokensRemaining, 10) : null,
+    tokensRemaining: parsedTokens !== null && !isNaN(parsedTokens) ? parsedTokens : null,
     tokensReset: tokensReset ? new Date(tokensReset) : null,
     lastUpdated: new Date(),
   };
@@ -87,7 +93,7 @@ function formatResetTime(reset: Date): string {
   return `in ${minutes}m`;
 }
 
-function formatTokens(tokens: number): string {
+export function formatTokens(tokens: number): string {
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}K`;
   return tokens.toString();
