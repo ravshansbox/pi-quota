@@ -8,7 +8,15 @@ import {
   parseAnthropicHeaders,
   parseOpenAIHeaders,
   formatQuotaStatus,
+  formatResetTime,
 } from "./quota-tracker";
+
+function renderBar(percent: number): string {
+  const width = 16;
+  const filled = Math.round((percent / 100) * width);
+  const empty = width - filled;
+  return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;
+}
 
 function loadConfig(): QuotaConfig | null {
   try {
@@ -35,10 +43,43 @@ export default function (pi: ExtensionAPI) {
   const states: QuotaState[] = [];
   let config: QuotaConfig | null = null;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
+  let currentProvider: string | null = null;
+  let ctxRef: any = null;
+
+  function updateWidget() {
+    if (!ctxRef || !currentProvider) return;
+    
+    const providerKey = currentProvider === "openai-codex" ? "openai" : currentProvider;
+    const state = states.find((s) => s.provider === providerKey);
+    
+    if (!state) {
+      ctxRef.ui.setWidget("pi-quota", undefined);
+      return;
+    }
+
+    const lines: string[] = [];
+    
+    if (state.sevenDayRemaining !== null) {
+      const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "?";
+      lines.push(`week ${renderBar(state.sevenDayRemaining)} ${state.sevenDayRemaining}% (${resetStr})`);
+    }
+    
+    if (state.fiveHourRemaining !== null) {
+      const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "?";
+      lines.push(`5h   ${renderBar(state.fiveHourRemaining)} ${state.fiveHourRemaining}% (${resetStr})`);
+    }
+    
+    if (lines.length > 0) {
+      ctxRef.ui.setWidget("pi-quota", lines);
+    } else {
+      ctxRef.ui.setWidget("pi-quota", undefined);
+    }
+  }
 
   pi.on("session_start", async (_event, ctx) => {
     states.length = 0;
     config = loadConfig();
+    ctxRef = ctx;
 
     if (!config) {
       ctx.ui.notify("pi-quota: No config found in settings.json", "warning");
@@ -66,13 +107,25 @@ export default function (pi: ExtensionAPI) {
       checkTimer = setTimeout(async () => {
         await pollQuotaStatus(states);
         await checkQuota(states, config!);
+        updateWidget();
         scheduleCheck();
       }, intervalMs);
     };
 
     await pollQuotaStatus(states);
     scheduleCheck();
+    updateWidget();
     ctx.ui.notify("pi-quota: tracking started", "info");
+  });
+
+  pi.on("model_select", async (event, ctx) => {
+    const provider = event.model?.provider;
+    if (provider === "anthropic" || provider === "openai-codex") {
+      currentProvider = provider;
+    } else {
+      currentProvider = null;
+    }
+    updateWidget();
   });
 
   pi.on("session_shutdown", async () => {

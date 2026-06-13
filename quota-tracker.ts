@@ -93,7 +93,7 @@ export function formatQuotaStatus(states: QuotaState[]): string {
   return lines.join("\n");
 }
 
-function formatResetTime(reset: Date): string {
+export function formatResetTime(reset: Date): string {
   const now = new Date();
   const diff = reset.getTime() - now.getTime();
 
