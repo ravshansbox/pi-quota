@@ -6,10 +6,10 @@ export interface QuotaConfig {
 
 export interface QuotaState {
   provider: "anthropic" | "openai";
-  requestsRemaining: number | null;
-  requestsReset: Date | null;
-  tokensRemaining: number | null;
-  tokensReset: Date | null;
+  fiveHourRemaining: number | null;
+  fiveHourReset: Date | null;
+  sevenDayRemaining: number | null;
+  sevenDayReset: Date | null;
   lastUpdated: Date;
 }
 
@@ -70,14 +70,14 @@ export function formatQuotaStatus(states: QuotaState[]): string {
     const provider = state.provider.charAt(0).toUpperCase() + state.provider.slice(1);
     lines.push(`${provider}:`);
 
-    if (state.requestsRemaining !== null) {
-      const resetStr = state.requestsReset ? formatResetTime(state.requestsReset) : "unknown";
-      lines.push(`• Requests: ${state.requestsRemaining} remaining (resets ${resetStr})`);
+    if (state.fiveHourRemaining !== null) {
+      const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
+      lines.push(`• 5 Hour: ${state.fiveHourRemaining}% remaining (resets ${resetStr})`);
     }
 
-    if (state.tokensRemaining !== null) {
-      const resetStr = state.tokensReset ? formatResetTime(state.tokensReset) : "unknown";
-      lines.push(`• Tokens: ${formatTokens(state.tokensRemaining)} remaining (resets ${resetStr})`);
+    if (state.sevenDayRemaining !== null) {
+      const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
+      lines.push(`• 7 Day: ${state.sevenDayRemaining}% remaining (resets ${resetStr})`);
     }
 
     lines.push("");

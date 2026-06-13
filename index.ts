@@ -164,18 +164,17 @@ async function pollQuotaStatus(states: QuotaState[]) {
       if (response.ok) {
         const data = await response.json() as any;
         
-        if (data.five_hour) {
-          const utilization = data.five_hour.utilization ?? 0;
-          const resetsAt = data.five_hour.resets_at ? new Date(data.five_hour.resets_at).getTime() : undefined;
-          updateState(states, {
-            provider: "anthropic",
-            requestsRemaining: Math.round(100 - utilization),
-            requestsReset: resetsAt ? new Date(resetsAt) : null,
-            tokensRemaining: null,
-            tokensReset: null,
-            lastUpdated: new Date(),
-          });
-        }
+        const fiveHour = data.five_hour;
+        const sevenDay = data.seven_day;
+        
+        updateState(states, {
+          provider: "anthropic",
+          fiveHourRemaining: fiveHour ? Math.round(100 - (fiveHour.utilization ?? 0)) : null,
+          fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
+          sevenDayRemaining: sevenDay ? Math.round(100 - (sevenDay.utilization ?? 0)) : null,
+          sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
+          lastUpdated: new Date(),
+        });
       }
     }
 
@@ -195,18 +194,14 @@ async function pollQuotaStatus(states: QuotaState[]) {
           const primary = data.rate_limit.primary_window;
           const secondary = data.rate_limit.secondary_window;
           
-          if (primary) {
-            const usedPercent = primary.used_percent ?? 0;
-            const resetAt = primary.reset_at ? primary.reset_at * 1000 : undefined;
-            updateState(states, {
-              provider: "openai",
-              requestsRemaining: Math.round(100 - usedPercent),
-              requestsReset: resetAt ? new Date(resetAt) : null,
-              tokensRemaining: null,
-              tokensReset: null,
-              lastUpdated: new Date(),
-            });
-          }
+          updateState(states, {
+            provider: "openai",
+            fiveHourRemaining: primary ? Math.round(100 - (primary.used_percent ?? 0)) : null,
+            fiveHourReset: primary?.reset_at ? new Date(primary.reset_at * 1000) : null,
+            sevenDayRemaining: secondary ? Math.round(100 - (secondary.used_percent ?? 0)) : null,
+            sevenDayReset: secondary?.reset_at ? new Date(secondary.reset_at * 1000) : null,
+            lastUpdated: new Date(),
+          });
         }
       }
     }
@@ -218,10 +213,10 @@ async function pollQuotaStatus(states: QuotaState[]) {
 function updateState(states: QuotaState[], parsed: Partial<QuotaState>) {
   const existing = states.find((s) => s.provider === parsed.provider);
   if (existing) {
-    if (parsed.requestsRemaining !== undefined) existing.requestsRemaining = parsed.requestsRemaining;
-    if (parsed.requestsReset !== undefined) existing.requestsReset = parsed.requestsReset;
-    if (parsed.tokensRemaining !== undefined) existing.tokensRemaining = parsed.tokensRemaining;
-    if (parsed.tokensReset !== undefined) existing.tokensReset = parsed.tokensReset;
+    if (parsed.fiveHourRemaining !== undefined) existing.fiveHourRemaining = parsed.fiveHourRemaining;
+    if (parsed.fiveHourReset !== undefined) existing.fiveHourReset = parsed.fiveHourReset;
+    if (parsed.sevenDayRemaining !== undefined) existing.sevenDayRemaining = parsed.sevenDayRemaining;
+    if (parsed.sevenDayReset !== undefined) existing.sevenDayReset = parsed.sevenDayReset;
     existing.lastUpdated = parsed.lastUpdated ?? new Date();
   } else {
     states.push(parsed as QuotaState);
@@ -232,18 +227,19 @@ async function checkQuota(states: QuotaState[], config: QuotaConfig) {
   const now = new Date();
 
   for (const state of states) {
-    const resetTime = state.requestsReset ?? state.tokensReset;
+    const fiveHourReset = state.fiveHourReset;
+    const sevenDayReset = state.sevenDayReset;
 
-    if (!resetTime) continue;
-
-    if (resetTime <= now) {
-      const message = `🔄 Quota Reset\n\n${formatQuotaStatus([state])}`;
+    if (fiveHourReset && fiveHourReset <= now) {
+      const message = `🔄 5 Hour Quota Reset\n\n${formatQuotaStatus([state])}`;
       const sent = await sendTelegram(config, message);
+      if (sent) state.fiveHourReset = null;
+    }
 
-      if (sent) {
-        state.requestsReset = null;
-        state.tokensReset = null;
-      }
+    if (sevenDayReset && sevenDayReset <= now) {
+      const message = `🔄 7 Day Quota Reset\n\n${formatQuotaStatus([state])}`;
+      const sent = await sendTelegram(config, message);
+      if (sent) state.sevenDayReset = null;
     }
   }
 }
