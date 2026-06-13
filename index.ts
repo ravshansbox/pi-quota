@@ -153,47 +153,61 @@ async function pollQuotaStatus(states: QuotaState[]) {
     const openaiToken = auth["openai-codex"]?.access;
 
     if (anthropicToken) {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
+      const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
         headers: {
           "Authorization": `Bearer ${anthropicToken}`,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
+          "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+          "accept": "application/json",
         },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1,
-          messages: [{ role: "user", content: "hi" }],
-        }),
       });
 
-      const headers = Object.fromEntries(response.headers.entries());
-      const parsed = parseAnthropicHeaders(headers);
-
-      if (parsed) {
-        updateState(states, parsed);
+      if (response.ok) {
+        const data = await response.json() as any;
+        
+        if (data.five_hour) {
+          const utilization = data.five_hour.utilization ?? 0;
+          const resetsAt = data.five_hour.resets_at ? new Date(data.five_hour.resets_at).getTime() : undefined;
+          updateState(states, {
+            provider: "anthropic",
+            requestsRemaining: Math.round(100 - utilization),
+            requestsReset: resetsAt ? new Date(resetsAt) : null,
+            tokensRemaining: null,
+            tokensReset: null,
+            lastUpdated: new Date(),
+          });
+        }
       }
     }
 
     if (openaiToken) {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
+      const response = await fetch("https://chatgpt.com/backend-api/wham/usage", {
         headers: {
-          Authorization: `Bearer ${openaiToken}`,
-          "Content-Type": "application/json",
+          "Authorization": `Bearer ${openaiToken}`,
+          "User-Agent": "OpenCode-Status-Plugin/1.0",
+          "accept": "application/json",
         },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          max_tokens: 1,
-          messages: [{ role: "user", content: "hi" }],
-        }),
       });
 
-      const headers = Object.fromEntries(response.headers.entries());
-      const parsed = parseOpenAIHeaders(headers);
-
-      if (parsed) {
-        updateState(states, parsed);
+      if (response.ok) {
+        const data = await response.json() as any;
+        
+        if (data.rate_limit) {
+          const primary = data.rate_limit.primary_window;
+          const secondary = data.rate_limit.secondary_window;
+          
+          if (primary) {
+            const usedPercent = primary.used_percent ?? 0;
+            const resetAt = primary.reset_at ? primary.reset_at * 1000 : undefined;
+            updateState(states, {
+              provider: "openai",
+              requestsRemaining: Math.round(100 - usedPercent),
+              requestsReset: resetAt ? new Date(resetAt) : null,
+              tokensRemaining: null,
+              tokensReset: null,
+              lastUpdated: new Date(),
+            });
+          }
+        }
       }
     }
   } catch (error) {
