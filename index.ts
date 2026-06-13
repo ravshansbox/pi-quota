@@ -119,8 +119,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      await sendTelegram(config, "🧪 pi-quota test message");
-      ctx.ui.notify("Test message sent to Telegram", "info");
+      const sent = await sendTelegram(config, "🧪 pi-quota test message");
+      ctx.ui.notify(sent ? "Test message sent" : "Failed to send — check logs", sent ? "info" : "error");
     },
   });
 }
