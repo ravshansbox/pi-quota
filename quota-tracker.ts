@@ -61,6 +61,13 @@ export function parseOpenAIHeaders(headers: Record<string, string>): Partial<Quo
   };
 }
 
+function renderBar(percent: number): string {
+  const width = 20;
+  const filled = Math.round((percent / 100) * width);
+  const empty = width - filled;
+  return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;
+}
+
 export function formatQuotaStatus(states: QuotaState[]): string {
   if (states.length === 0) return "No quota data collected yet.";
 
@@ -72,12 +79,12 @@ export function formatQuotaStatus(states: QuotaState[]): string {
 
     if (state.sevenDayRemaining !== null) {
       const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
-      lines.push(`• week: ${state.sevenDayRemaining}% remaining (resets ${resetStr})`);
+      lines.push(`  week  ${renderBar(state.sevenDayRemaining)} ${state.sevenDayRemaining}%  resets ${resetStr}`);
     }
 
     if (state.fiveHourRemaining !== null) {
       const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
-      lines.push(`• 5h: ${state.fiveHourRemaining}% remaining (resets ${resetStr})`);
+      lines.push(`  5h    ${renderBar(state.fiveHourRemaining)} ${state.fiveHourRemaining}%  resets ${resetStr}`);
     }
 
     lines.push("");
