@@ -1,23 +1,25 @@
 # pi-quota
 
-Pi extension that tracks Anthropic and OpenAI API quota usage and sends Telegram notifications when quotas reset.
+Pi extension that tracks Anthropic and OpenAI Codex quota usage and sends Telegram notifications when quotas reset.
 
 ## Installation
 
-1. Copy `index.ts` and `quota-tracker.ts` to `~/.pi/agent/extensions/pi-quota/`
-
-2. Add to `~/.pi/agent/settings.json`:
+Add to `~/.pi/agent/settings.json`:
 
 ```json
 {
+  "packages": [
+    "git:github.com/ravshansbox/pi-quota"
+  ],
   "quota": {
     "botToken": "YOUR_TELEGRAM_BOT_TOKEN",
-    "chatId": "YOUR_TELEGRAM_CHAT_ID"
+    "chatId": "YOUR_TELEGRAM_CHAT_ID",
+    "pollIntervalMs": 600000
   }
 }
 ```
 
-3. Restart pi or run `/reload`
+Run `pi update` to install.
 
 ## Configuration
 
@@ -25,21 +27,22 @@ Pi extension that tracks Anthropic and OpenAI API quota usage and sends Telegram
 |-------|----------|---------|-------------|
 | `botToken` | Yes | — | Telegram Bot API token |
 | `chatId` | Yes | — | Telegram chat ID |
-| `pollIntervalMs` | No | `600000` | Interval in ms between reset-time checks (minimum 60000) |
+| `pollIntervalMs` | No | 600000 | Polling interval (ms, minimum 60000) |
 
 ## Commands
 
-- `/quota` — Show current quota status
-- `/quota-test` — Test Telegram notification
+- `/quota` — Show current quota status with progress bars
 
 ## How It Works
 
-1. Extracts rate-limit headers passively from Anthropic/OpenAI API responses during normal usage — no API calls made just for headers
-2. A periodic timer checks whether any tracked reset times have arrived (interval configurable via `pollIntervalMs`, default 10 minutes)
-3. When a reset time is reached, sends a Telegram notification with the quota status
+1. Polls Anthropic and OpenAI Codex usage APIs every 10 minutes using OAuth tokens from `~/.pi/agent/auth.json`
+2. Displays 5-hour and weekly quota usage with progress bars
+3. Sends Telegram notification when a quota window resets
 
-## Environment Variables
+## Output Example
 
-Requires API keys to be set:
-- `ANTHROPIC_API_KEY` for Anthropic quota tracking
-- `OPENAI_API_KEY` for OpenAI quota tracking
+```
+anthropic:
+  week [████████████████████] 100% (1d 13h)
+  5h   [████████░░░░░░░░░░░░] 40% (23m)
+```
