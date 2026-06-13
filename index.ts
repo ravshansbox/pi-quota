@@ -25,7 +25,7 @@ function loadConfig(): QuotaConfig | null {
 export default function (pi: ExtensionAPI) {
   const states: QuotaState[] = [];
   let config: QuotaConfig | null = null;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let checkTimer: ReturnType<typeof setTimeout> | null = null;
 
   pi.on("session_start", async (_event, ctx) => {
     config = loadConfig();
@@ -40,21 +40,23 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    await pollQuotaStatus(pi, states);
-
     const intervalMs = config.pollIntervalMs ?? 600000;
-    pollTimer = setInterval(() => {
-      pollQuotaStatus(pi, states);
-      checkQuota(pi, states, config!);
-    }, intervalMs);
 
-    ctx.ui.notify("pi-quota: tracking started", "info");
+    const scheduleCheck = () => {
+      checkTimer = setTimeout(async () => {
+        await checkQuota(states, config!);
+        scheduleCheck();
+      }, intervalMs);
+    };
+
+    scheduleCheck();
+    ctx.ui.notify("pi-quota: tracking started (passive)", "info");
   });
 
   pi.on("session_shutdown", async () => {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
+    if (checkTimer) {
+      clearTimeout(checkTimer);
+      checkTimer = null;
     }
   });
 
@@ -102,74 +104,7 @@ function detectProvider(event: { headers: Record<string, string> }): "anthropic"
   return null;
 }
 
-async function pollQuotaStatus(pi: ExtensionAPI, states: QuotaState[]) {
-  try {
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    const openaiKey = process.env.OPENAI_API_KEY;
-
-    if (anthropicKey) {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1,
-          messages: [{ role: "user", content: "hi" }],
-        }),
-      });
-
-      const headers = Object.fromEntries(response.headers.entries());
-      const parsed = parseAnthropicHeaders(headers);
-
-      if (parsed) {
-        updateState(states, parsed);
-      }
-    }
-
-    if (openaiKey) {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${openaiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          max_tokens: 1,
-          messages: [{ role: "user", content: "hi" }],
-        }),
-      });
-
-      const headers = Object.fromEntries(response.headers.entries());
-      const parsed = parseOpenAIHeaders(headers);
-
-      if (parsed) {
-        updateState(states, parsed);
-      }
-    }
-  } catch (error) {
-    console.error("pi-quota: Poll error:", error);
-  }
-}
-
-function updateState(states: QuotaState[], parsed: Partial<QuotaState>) {
-  const existing = states.find((s) => s.provider === parsed.provider);
-  if (existing) {
-    if (parsed.requestsRemaining !== undefined) existing.requestsRemaining = parsed.requestsRemaining;
-    if (parsed.requestsReset !== undefined) existing.requestsReset = parsed.requestsReset;
-    if (parsed.tokensRemaining !== undefined) existing.tokensRemaining = parsed.tokensRemaining;
-    if (parsed.tokensReset !== undefined) existing.tokensReset = parsed.tokensReset;
-    existing.lastUpdated = parsed.lastUpdated ?? new Date();
-  } else {
-    states.push(parsed as QuotaState);
-  }
-}
-
-async function checkQuota(_pi: ExtensionAPI, states: QuotaState[], config: QuotaConfig) {
+async function checkQuota(states: QuotaState[], config: QuotaConfig) {
   const now = new Date();
 
   for (const state of states) {
