@@ -123,18 +123,6 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("quota-test", {
-    description: "Test Telegram notification",
-    handler: async (_args, ctx) => {
-      if (!config) {
-        ctx.ui.notify("pi-quota: No config found", "error");
-        return;
-      }
-
-      const sent = await sendTelegram(config, "🧪 pi-quota test message");
-      ctx.ui.notify(sent ? "Test message sent" : "Failed to send — check logs", sent ? "info" : "error");
-    },
-  });
 }
 
 function detectProvider(event: { headers: Record<string, string> }): "anthropic" | "openai" | null {
