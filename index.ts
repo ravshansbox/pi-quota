@@ -107,6 +107,10 @@ export default function (pi: ExtensionAPI) {
 
     await pollQuotaStatus(states);
     scheduleCheck();
+    const startProvider = ctx.model?.provider;
+    if (startProvider === "anthropic" || startProvider === "openai-codex") {
+      currentProvider = startProvider;
+    }
     updateWidget();
     ctx.ui.notify("pi-quota: tracking started", "info");
   });
