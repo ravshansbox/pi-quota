@@ -183,7 +183,7 @@ async function pollQuotaStatus(states: QuotaState[]) {
       const response = await fetch("https://chatgpt.com/backend-api/wham/usage", {
         headers: {
           "Authorization": `Bearer ${openaiToken}`,
-          "User-Agent": "OpenCode-Status-Plugin/1.0",
+          "User-Agent": "pi-quota/1.0",
           "accept": "application/json",
         },
       });
