@@ -214,7 +214,7 @@ export default function (pi: ExtensionAPI) {
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let updateTimer: ReturnType<typeof setTimeout> | null = null;
   let updateOffset: number | undefined;
-  let currentProvider: string | null = null;
+
   let ctxRef: ExtensionContext | null = null;
   let isLeader = false;
   let leaseStaleMs = 180000;
@@ -273,23 +273,33 @@ export default function (pi: ExtensionAPI) {
   function updateWidget() {
     if (!ctxRef) return;
 
-    if (!currentProvider) {
+    const providerStates = states.filter((s) => s.provider === "anthropic" || s.provider === "openai");
+
+    if (providerStates.length === 0) {
       ctxRef.ui.setWidget("pi-quota", undefined);
       return;
     }
 
-    const providerKey = currentProvider === "openai-codex" ? "openai" : currentProvider;
-    const state = states.find((s) => s.provider === providerKey);
+    const statusLabel = isLeader ? "main" : "standby";
+    const errorSuffix = botPollError ? ` · telegram ${botPollError}` : "";
 
-    if (!state) {
-      ctxRef.ui.setWidget("pi-quota", undefined);
-      return;
+    const lines: string[] = [];
+    for (const state of providerStates) {
+      const parts: string[] = [];
+      if (state.sevenDayRemaining !== null) {
+        const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
+        parts.push(`7d: ${state.sevenDayRemaining}% left (${resetStr})`);
+      }
+      if (state.fiveHourRemaining !== null) {
+        const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
+        parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
+      }
+      const label = state.provider === "openai" ? "openai-codex" : state.provider;
+      lines.push(`${label}: ${parts.join(", ")}`);
     }
 
-    const text = formatQuotaStatus([state], false);
-    const statusText = botPollError ? `${text} · telegram ${botPollError}` : text;
-    const leaderLabel = isLeader ? "⏺" : "○";
-    ctxRef.ui.setWidget("pi-quota", [`${leaderLabel} ${statusText}`]);
+    lines.push(`role: ${statusLabel}${errorSuffix}`);
+    ctxRef.ui.setWidget("pi-quota", lines);
   }
 
   function formatBotPollError(error: unknown): string {
@@ -612,18 +622,8 @@ export default function (pi: ExtensionAPI) {
     scheduleCheck();
     scheduleUpdates();
 
-    const startProvider = ctx.model?.provider;
-    if (startProvider === "anthropic" || startProvider === "openai-codex") {
-      currentProvider = startProvider;
-    }
     updateWidget();
     ctx.ui.notify("pi-quota: tracking started", "info");
-  });
-
-  pi.on("model_select", async (event) => {
-    const provider = event.model?.provider;
-    currentProvider = provider === "anthropic" || provider === "openai-codex" ? provider : null;
-    updateWidget();
   });
 
   pi.on("session_shutdown", async () => {
@@ -645,12 +645,5 @@ export default function (pi: ExtensionAPI) {
       }
     }
     isLeader = false;
-  });
-
-  pi.registerCommand("quota", {
-    description: "Show current quota status",
-    handler: async (_args, ctx) => {
-      ctx.ui.notify(formatQuotaStatus(states), "info");
-    },
   });
 }
