@@ -98,7 +98,8 @@ function formatResetTime(reset: Date): string {
 
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  if (minutes > 0) return `${minutes}m`;
+  return "now";
 }
 
 function formatQuotaStatus(states: QuotaState[], showProvider = true): string {
