@@ -6,7 +6,7 @@
  * events; it is verified manually by running it in pi. Do not add a test suite here.
  */
 
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, hostname } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -154,6 +154,19 @@ function leaderPath() {
   return join(homedir(), ".pi", "agent", "pi-quota.lock");
 }
 
+function logPath() {
+  return join(homedir(), ".pi", "agent", "pi-quota.log");
+}
+
+function logError(message: string, error?: unknown) {
+  const detail = error instanceof Error ? error.stack ?? error.message : error !== undefined ? String(error) : "";
+  const line = `[${new Date().toISOString()}] ${message}${detail ? ` ${detail}` : ""}\n`;
+  try {
+    appendFileSync(logPath(), line);
+  } catch {
+  }
+}
+
 function readLease(): Lease | null {
   try {
     return JSON.parse(readFileSync(leaderPath(), "utf-8")) as Lease;
@@ -175,7 +188,7 @@ function overwriteLease(lease: Lease) {
   try {
     writeFileSync(leaderPath(), JSON.stringify(lease));
   } catch (error) {
-    console.error("pi-quota: failed to write leader lock:", error);
+    logError("failed to write leader lock:", error);
   }
 }
 
@@ -360,12 +373,12 @@ export default function (pi: ExtensionAPI) {
       });
 
       if (!response.ok) {
-        console.error(`pi-quota: Telegram API error: ${response.status}`);
+        logError(`Telegram API error: ${response.status}`);
         return false;
       }
       return true;
     } catch (error) {
-      console.error("pi-quota: Failed to send Telegram message:", error);
+      logError("Failed to send Telegram message:", error);
       return false;
     }
   }
@@ -386,7 +399,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     if (!response.ok) {
-      console.error(`pi-quota: Anthropic token refresh failed: ${response.status}`);
+      logError(`Anthropic token refresh failed: ${response.status}`);
       return record;
     }
 
@@ -418,7 +431,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     if (!response.ok) {
-      console.error(`pi-quota: OpenAI Codex token refresh failed: ${response.status}`);
+      logError(`OpenAI Codex token refresh failed: ${response.status}`);
       return record;
     }
 
@@ -462,7 +475,7 @@ export default function (pi: ExtensionAPI) {
             lastUpdated: new Date(),
           });
         } else {
-          console.error(`pi-quota: Anthropic usage request failed: ${response.status}`);
+          logError(`Anthropic usage request failed: ${response.status}`);
         }
       }
 
@@ -491,11 +504,11 @@ export default function (pi: ExtensionAPI) {
             });
           }
         } else {
-          console.error(`pi-quota: OpenAI Codex usage request failed: ${response.status}`);
+          logError(`OpenAI Codex usage request failed: ${response.status}`);
         }
       }
     } catch (error) {
-      console.error("pi-quota: Poll error:", error);
+      logError("Poll error:", error);
     }
   }
 
@@ -508,7 +521,7 @@ export default function (pi: ExtensionAPI) {
       const response = await fetch(`https://api.telegram.org/bot${config.botToken}/getUpdates?${params.toString()}`);
       if (!response.ok) {
         botPollError = `HTTP ${response.status}`;
-        console.error(`pi-quota: getUpdates failed: ${response.status}`);
+        logError(`getUpdates failed: ${response.status}`);
         updateWidget();
         return;
       }
@@ -535,7 +548,7 @@ export default function (pi: ExtensionAPI) {
       }
     } catch (error) {
       botPollError = formatBotPollError(error);
-      console.error(`pi-quota: getUpdates error: ${botPollError}`);
+      logError(`getUpdates error: ${botPollError}`);
       updateWidget();
     }
   }
