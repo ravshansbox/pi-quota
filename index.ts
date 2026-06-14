@@ -288,7 +288,8 @@ export default function (pi: ExtensionAPI) {
 
     const text = formatQuotaStatus([state], false);
     const statusText = botPollError ? `${text} · telegram ${botPollError}` : text;
-    ctxRef.ui.setWidget("pi-quota", [statusText]);
+    const leaderLabel = isLeader ? "⏺" : "○";
+    ctxRef.ui.setWidget("pi-quota", [`${leaderLabel} ${statusText}`]);
   }
 
   function formatBotPollError(error: unknown): string {
