@@ -298,7 +298,7 @@ export default function (pi: ExtensionAPI) {
       lines.push(`${label}: ${parts.join(", ")}`);
     }
 
-    lines.push(`role: ${statusLabel}${errorSuffix}`);
+    lines.unshift(`role: ${statusLabel}${errorSuffix}`);
     ctxRef.ui.setWidget("pi-quota", lines);
   }
 
