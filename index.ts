@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs
 import { join } from "node:path";
 import { homedir, hostname } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 
 interface QuotaConfig {
   botToken: string;
@@ -26,6 +27,8 @@ interface QuotaState {
   sevenDayReset: Date | null;
   lastUpdated: Date;
 }
+
+type WidgetSegment = { text: string; role: "muted" | "warning" };
 
 type OAuthAuthRecord = {
   type?: string;
@@ -275,21 +278,19 @@ export default function (pi: ExtensionAPI) {
     becomeFollower();
   }
 
-  function updateWidget() {
-    if (!ctxRef) return;
-
+  function buildWidgetLines(): WidgetSegment[][] {
     const providerStates = states.filter((s) => s.provider === "anthropic" || s.provider === "openai-codex");
-
-    if (providerStates.length === 0) {
-      ctxRef.ui.setWidget("pi-quota", undefined);
-      return;
-    }
+    if (providerStates.length === 0) return [];
 
     const statusLabel = isLeader ? "main" : "standby";
     const errorSuffix = botPollError ? ` · telegram ${botPollError}` : "";
 
-    const lines: string[] = [];
+    const statusLine: WidgetSegment[] = [{ role: "muted", text: `role: ${statusLabel}` }];
+    if (errorSuffix) statusLine.push({ role: "warning", text: errorSuffix });
+
+    const lines: WidgetSegment[][] = [statusLine];
     for (const state of providerStates) {
+      const label = PROVIDER_LABELS[state.provider];
       const parts: string[] = [];
       if (state.sevenDayRemaining !== null) {
         const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
@@ -299,12 +300,25 @@ export default function (pi: ExtensionAPI) {
         const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
         parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
       }
-      const label = PROVIDER_LABELS[state.provider];
-      lines.push(`${label}: ${parts.join(", ")}`);
+      lines.push([{ role: "muted", text: `${label}: ${parts.join(", ")}` }]);
+    }
+    return lines;
+  }
+
+  function updateWidget() {
+    if (!ctxRef) return;
+
+    const lines = buildWidgetLines();
+
+    if (lines.length === 0) {
+      ctxRef.ui.setWidget("pi-quota", undefined);
+      return;
     }
 
-    lines.unshift(`role: ${statusLabel}${errorSuffix}`);
-    ctxRef.ui.setWidget("pi-quota", lines);
+    ctxRef.ui.setWidget("pi-quota", (_tui, theme) => {
+      const body = lines.map((line) => line.map((seg) => theme.fg(seg.role, seg.text)).join("")).join("\n");
+      return new Text(body, 0, 0);
+    });
   }
 
   function formatBotPollError(error: unknown): string {
