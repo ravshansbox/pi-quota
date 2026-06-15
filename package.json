@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "^0.79.3"
+    "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
     "typescript": "^5.0.0"
