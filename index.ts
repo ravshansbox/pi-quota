@@ -19,7 +19,7 @@ interface QuotaConfig {
 }
 
 interface QuotaState {
-  provider: "anthropic" | "openai";
+  provider: "anthropic" | "openai-codex";
   fiveHourRemaining: number | null;
   fiveHourReset: Date | null;
   sevenDayRemaining: number | null;
@@ -88,6 +88,11 @@ type Lease = {
 
 const LEASE_STALE_FACTOR = 3;
 
+const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
+  anthropic: "claude",
+  "openai-codex": "codex",
+};
+
 function formatResetTime(reset: Date): string {
   const diff = reset.getTime() - Date.now();
   if (diff <= 0) return "now";
@@ -107,7 +112,7 @@ function formatQuotaStatus(states: QuotaState[], showProvider = true): string {
 
   return states
     .map((state) => {
-      const provider = state.provider === "openai" ? "openai-codex" : state.provider;
+      const provider = PROVIDER_LABELS[state.provider];
       const parts: string[] = [];
 
       if (state.sevenDayRemaining !== null) {
@@ -273,7 +278,7 @@ export default function (pi: ExtensionAPI) {
   function updateWidget() {
     if (!ctxRef) return;
 
-    const providerStates = states.filter((s) => s.provider === "anthropic" || s.provider === "openai");
+    const providerStates = states.filter((s) => s.provider === "anthropic" || s.provider === "openai-codex");
 
     if (providerStates.length === 0) {
       ctxRef.ui.setWidget("pi-quota", undefined);
@@ -294,7 +299,7 @@ export default function (pi: ExtensionAPI) {
         const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
         parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
       }
-      const label = state.provider === "openai" ? "openai-codex" : state.provider;
+      const label = PROVIDER_LABELS[state.provider];
       lines.push(`${label}: ${parts.join(", ")}`);
     }
 
@@ -345,7 +350,7 @@ export default function (pi: ExtensionAPI) {
         resetTimers.delete(key);
         return;
       }
-      const label = state.provider === "openai" ? "openai-codex" : state.provider;
+      const label = PROVIDER_LABELS[state.provider];
       const message = `🔄 ${label} ${window} quota reset\n\n${formatQuotaStatus([state])}`;
       if (await sendTelegram(config!, message)) {
         resetTimers.delete(key);
@@ -507,7 +512,7 @@ export default function (pi: ExtensionAPI) {
             const primary = data.rate_limit.primary_window;
             const secondary = data.rate_limit.secondary_window;
             updateState({
-              provider: "openai",
+              provider: "openai-codex",
               fiveHourRemaining: primary ? Math.round(100 - (primary.used_percent ?? 0)) : null,
               fiveHourReset: primary?.reset_at ? new Date(primary.reset_at * 1000) : null,
               sevenDayRemaining: secondary ? Math.round(100 - (secondary.used_percent ?? 0)) : null,

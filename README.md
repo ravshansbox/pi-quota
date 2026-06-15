@@ -40,7 +40,7 @@ Run `pi update` to install.
 
 - Polls Anthropic and OpenAI Codex usage endpoints every 10 minutes by default
 - Shows a widget below the prompt when the active provider is `anthropic` or `openai-codex`
-- Reports use one compact line per provider, e.g. `openai-codex: 7d: 89% left (1d 13h), 5h: 30% left (4h 39m)`
+- Reports use one compact line per provider, e.g. `codex: 7d: 89% left (1d 13h), 5h: 30% left (4h 39m)`
 - The `/quota` command and Telegram messages use this format; the widget omits the provider prefix since pi already shows the active provider
 - Schedules one-shot timers for each known reset time and sends a Telegram message when a `5h` or `7d` window resets
 - Refreshes Anthropic and OpenAI Codex OAuth access tokens from `~/.pi/agent/auth.json` when needed and writes updated credentials back
