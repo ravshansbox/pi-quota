@@ -8,7 +8,7 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^6.0.3"
   },
   "pi": {
     "extensions": ["./index.ts"]
