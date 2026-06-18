@@ -25,7 +25,7 @@ interface QuotaState {
   lastUpdated: Date;
 }
 
-type WidgetSegment = { text: string; role: "muted" | "warning" };
+type WidgetSegment = { text: string; role: "muted" };
 
 type OAuthAuthRecord = {
   type?: string;
@@ -82,29 +82,6 @@ function formatResetTime(reset: Date): string {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m`;
   return "now";
-}
-
-function formatQuotaStatus(states: QuotaState[], showProvider = true): string {
-  if (states.length === 0) return "No quota data collected yet.";
-
-  return states
-    .map((state) => {
-      const provider = PROVIDER_LABELS[state.provider];
-      const parts: string[] = [];
-
-      if (state.sevenDayRemaining !== null) {
-        const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
-        parts.push(`7d: ${state.sevenDayRemaining}% left (${resetStr})`);
-      }
-
-      if (state.fiveHourRemaining !== null) {
-        const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
-        parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
-      }
-
-      return showProvider ? `${provider}: ${parts.join(", ")}` : parts.join(", ");
-    })
-    .join("\n");
 }
 
 function loadConfig(): QuotaConfig | null {
