@@ -28,11 +28,9 @@ interface QuotaState {
 type WidgetSegment = { text: string; role: "muted" };
 
 type OAuthAuthRecord = {
-  type?: string;
   access?: string;
   refresh?: string;
   expires?: number;
-  key?: string;
 };
 
 type AuthFile = Record<string, OAuthAuthRecord>;
@@ -69,6 +67,14 @@ const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
   anthropic: "claude",
   "openai-codex": "codex",
 };
+
+const REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_POLL_INTERVAL_MS = 600_000;
+const MIN_POLL_INTERVAL_MS = 60_000;
+
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
 
 function formatResetTime(reset: Date): string {
   const diff = reset.getTime() - Date.now();
@@ -110,6 +116,12 @@ function saveAuth(auth: AuthFile) {
   writeFileSync(authPath(), JSON.stringify(auth, null, 2));
 }
 
+function persistAuthRecord(provider: string, record: OAuthAuthRecord) {
+  const current = loadAuth() ?? {};
+  current[provider] = record;
+  saveAuth(current);
+}
+
 function logPath() {
   return join(homedir(), ".pi", "agent", "pi-quota.log");
 }
@@ -125,15 +137,21 @@ function logError(message: string, error?: unknown) {
 
 export default function (pi: ExtensionAPI) {
   const states: QuotaState[] = [];
+  const refreshNotified = new Set<string>();
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let ctxRef: ExtensionContext | null = null;
 
+  function notifyRefreshOnce(provider: string, message: string) {
+    if (refreshNotified.has(provider)) return;
+    refreshNotified.add(provider);
+    ctxRef?.ui.notify(message, "info");
+  }
+
   function buildWidgetLines(): WidgetSegment[][] {
-    const providerStates = states.filter((s) => s.provider === "anthropic" || s.provider === "openai-codex");
-    if (providerStates.length === 0) return [];
+    if (states.length === 0) return [];
 
     const lines: WidgetSegment[][] = [];
-    for (const state of providerStates) {
+    for (const state of states) {
       const label = PROVIDER_LABELS[state.provider];
       const parts: string[] = [];
       if (state.sevenDayRemaining !== null) {
@@ -162,7 +180,7 @@ export default function (pi: ExtensionAPI) {
     ctxRef.ui.setWidget("pi-quota", (_tui, theme) => {
       const body = lines.map((line) => line.map((seg) => theme.fg(seg.role, seg.text)).join("")).join("\n");
       return new Text(body, 0, 0);
-    });
+    }, { placement: "belowEditor" });
   }
 
   function updateState(parsed: QuotaState) {
@@ -192,6 +210,7 @@ export default function (pi: ExtensionAPI) {
         refresh_token: record.refresh,
         client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
       }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -206,8 +225,8 @@ export default function (pi: ExtensionAPI) {
       refresh: data.refresh_token ?? record.refresh,
       expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
     };
-    saveAuth(auth);
-    ctxRef?.ui.notify("pi-quota: refreshed Anthropic auth", "info");
+    persistAuthRecord("anthropic", auth.anthropic);
+    notifyRefreshOnce("anthropic", "pi-quota: refreshed Anthropic auth");
     return auth.anthropic;
   }
 
@@ -224,6 +243,7 @@ export default function (pi: ExtensionAPI) {
         refresh_token: record.refresh,
         client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
       }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -238,8 +258,8 @@ export default function (pi: ExtensionAPI) {
       refresh: data.refresh_token ?? record.refresh,
       expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
     };
-    saveAuth(auth);
-    ctxRef?.ui.notify("pi-quota: refreshed OpenAI Codex auth", "info");
+    persistAuthRecord("openai-codex", auth["openai-codex"]);
+    notifyRefreshOnce("openai-codex", "pi-quota: refreshed OpenAI Codex auth");
     return auth["openai-codex"];
   }
 
@@ -256,6 +276,7 @@ export default function (pi: ExtensionAPI) {
             "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
             "accept": "application/json",
           },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
 
         if (response.ok) {
@@ -264,9 +285,9 @@ export default function (pi: ExtensionAPI) {
           const sevenDay = data.seven_day;
           updateState({
             provider: "anthropic",
-            fiveHourRemaining: fiveHour ? Math.round(100 - (fiveHour.utilization ?? 0)) : null,
+            fiveHourRemaining: fiveHour ? clampPercent(100 - (fiveHour.utilization ?? 0)) : null,
             fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
-            sevenDayRemaining: sevenDay ? Math.round(100 - (sevenDay.utilization ?? 0)) : null,
+            sevenDayRemaining: sevenDay ? clampPercent(100 - (sevenDay.utilization ?? 0)) : null,
             sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
             lastUpdated: new Date(),
           });
@@ -283,6 +304,7 @@ export default function (pi: ExtensionAPI) {
             "User-Agent": "pi-quota/1.0",
             "accept": "application/json",
           },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
 
         if (response.ok) {
@@ -292,9 +314,9 @@ export default function (pi: ExtensionAPI) {
             const secondary = data.rate_limit.secondary_window;
             updateState({
               provider: "openai-codex",
-              fiveHourRemaining: primary ? Math.round(100 - (primary.used_percent ?? 0)) : null,
+              fiveHourRemaining: primary ? clampPercent(100 - (primary.used_percent ?? 0)) : null,
               fiveHourReset: primary?.reset_at ? new Date(primary.reset_at * 1000) : null,
-              sevenDayRemaining: secondary ? Math.round(100 - (secondary.used_percent ?? 0)) : null,
+              sevenDayRemaining: secondary ? clampPercent(100 - (secondary.used_percent ?? 0)) : null,
               sevenDayReset: secondary?.reset_at ? new Date(secondary.reset_at * 1000) : null,
               lastUpdated: new Date(),
             });
@@ -309,16 +331,23 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    if (checkTimer) {
+      clearTimeout(checkTimer);
+      checkTimer = null;
+    }
     states.length = 0;
+    refreshNotified.clear();
     ctxRef = ctx;
 
     const config = loadConfig();
-    if (config?.pollIntervalMs !== undefined && (typeof config.pollIntervalMs !== "number" || config.pollIntervalMs < 60000)) {
-      ctx.ui.notify("pi-quota: pollIntervalMs must be >= 60000 (1 minute)", "error");
-      return;
+    let intervalMs = config?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    if (typeof intervalMs !== "number" || intervalMs < MIN_POLL_INTERVAL_MS) {
+      ctx.ui.notify(
+        `pi-quota: pollIntervalMs must be a number >= ${MIN_POLL_INTERVAL_MS}; using default ${DEFAULT_POLL_INTERVAL_MS}`,
+        "warning",
+      );
+      intervalMs = DEFAULT_POLL_INTERVAL_MS;
     }
-
-    const intervalMs = config?.pollIntervalMs ?? 600000;
 
     const scheduleCheck = () => {
       checkTimer = setTimeout(async () => {

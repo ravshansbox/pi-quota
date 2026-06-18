@@ -33,7 +33,7 @@ All settings under the `quota` key in `~/.pi/agent/settings.json`:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `pollIntervalMs` | No | 600000 | Quota polling interval in ms, minimum 60000 |
+| `pollIntervalMs` | No | 600000 | Quota polling interval in ms, minimum 60000. Invalid values fall back to the default with a warning |
 
 OAuth credentials for Anthropic and OpenAI Codex are read from
 `~/.pi/agent/auth.json`. Neither provider is required: a missing credential just
@@ -69,8 +69,10 @@ labelled `7d`.
 Before each usage call, `ensureAnthropicAccess` / `ensureOpenAIAccess` check the
 stored token's `expires` timestamp. If it is within 60 seconds of expiry (or
 missing), they exchange the stored `refresh` token for a new access token, write
-the updated record back to `auth.json`, and notify the user. Refresh failures
-log an error and fall back to the existing record.
+the updated record back to `auth.json` (re-reading the file first so concurrent
+updates to other keys are preserved), and notify the user on the first refresh
+per provider each session. Refresh failures log an error and fall back to the
+existing record. All HTTP requests use a 30s timeout.
 
 ### 3. State Tracking
 
