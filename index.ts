@@ -14,6 +14,9 @@ import { Text } from "@earendil-works/pi-tui";
 
 interface QuotaConfig {
   pollIntervalMs?: number;
+  codexResets?: {
+    autoRedeem?: boolean;
+  };
 }
 
 interface QuotaState {
@@ -22,6 +25,7 @@ interface QuotaState {
   fiveHourReset: Date | null;
   sevenDayRemaining: number | null;
   sevenDayReset: Date | null;
+  resetsAvailable: number;
   lastUpdated: Date;
 }
 
@@ -61,6 +65,23 @@ type OpenAIUsageResponse = {
     primary_window?: OpenAIUsageWindow;
     secondary_window?: OpenAIUsageWindow;
   };
+  rate_limit_reset_credits?: {
+    available_count?: number;
+  };
+};
+
+type CodexResetCredit = {
+  id: string;
+  status?: string;
+};
+
+type CodexResetCreditList = {
+  credits: CodexResetCredit[];
+  available_count?: number;
+};
+
+type CodexResetConsumeResponse = {
+  code?: string;
 };
 
 const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
@@ -140,6 +161,7 @@ export default function (pi: ExtensionAPI) {
   const refreshNotified = new Set<string>();
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let ctxRef: ExtensionContext | null = null;
+  let codexRedeemAttempted = false;
 
   function notifyRefreshOnce(provider: string, message: string) {
     if (refreshNotified.has(provider)) return;
@@ -161,6 +183,9 @@ export default function (pi: ExtensionAPI) {
       if (state.fiveHourRemaining !== null) {
         const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
         parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
+      }
+      if (state.resetsAvailable > 0) {
+        parts.push(`${state.resetsAvailable} reset${state.resetsAvailable === 1 ? "" : "s"}`);
       }
       lines.push([{ role: "muted", text: `${label}: ${parts.join(", ")}` }]);
     }
@@ -194,6 +219,7 @@ export default function (pi: ExtensionAPI) {
     existing.fiveHourReset = parsed.fiveHourReset;
     existing.sevenDayRemaining = parsed.sevenDayRemaining;
     existing.sevenDayReset = parsed.sevenDayReset;
+    existing.resetsAvailable = parsed.resetsAvailable;
     existing.lastUpdated = parsed.lastUpdated;
   }
 
@@ -263,6 +289,56 @@ export default function (pi: ExtensionAPI) {
     return auth["openai-codex"];
   }
 
+  async function listCodexResetCredits(accessToken: string): Promise<CodexResetCreditList | null> {
+    try {
+      const response = await fetch("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", {
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "User-Agent": "pi-quota/1.0",
+          "accept": "application/json",
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        logError(`List reset credits failed: ${response.status}`);
+        return null;
+      }
+
+      return await response.json() as CodexResetCreditList;
+    } catch (error) {
+      logError("List reset credits error:", error);
+      return null;
+    }
+  }
+
+  async function consumeCodexResetCredit(accessToken: string, creditId: string): Promise<CodexResetConsumeResponse | null> {
+    try {
+      const redeemRequestId = crypto.randomUUID();
+      const response = await fetch("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "User-Agent": "pi-quota/1.0",
+          "Content-Type": "application/json",
+          "accept": "application/json",
+        },
+        body: JSON.stringify({ credit_id: creditId, redeem_request_id: redeemRequestId }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        logError(`Consume reset credit failed: ${response.status}`);
+        return null;
+      }
+
+      return await response.json() as CodexResetConsumeResponse;
+    } catch (error) {
+      logError("Consume reset credit error:", error);
+      return null;
+    }
+  }
+
   async function pollQuotaStatus() {
     try {
       const auth = loadAuth();
@@ -289,6 +365,7 @@ export default function (pi: ExtensionAPI) {
             fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
             sevenDayRemaining: sevenDay ? clampPercent(100 - (sevenDay.utilization ?? 0)) : null,
             sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
+            resetsAvailable: 0,
             lastUpdated: new Date(),
           });
         } else {
@@ -312,12 +389,14 @@ export default function (pi: ExtensionAPI) {
           if (data.rate_limit) {
             const primary = data.rate_limit.primary_window;
             const secondary = data.rate_limit.secondary_window;
+            const resetsAvailable = data.rate_limit_reset_credits?.available_count;
             updateState({
               provider: "openai-codex",
               fiveHourRemaining: primary ? clampPercent(100 - (primary.used_percent ?? 0)) : null,
               fiveHourReset: primary?.reset_at ? new Date(primary.reset_at * 1000) : null,
               sevenDayRemaining: secondary ? clampPercent(100 - (secondary.used_percent ?? 0)) : null,
               sevenDayReset: secondary?.reset_at ? new Date(secondary.reset_at * 1000) : null,
+              resetsAvailable: resetsAvailable !== undefined ? Math.max(0, Math.trunc(resetsAvailable)) : 0,
               lastUpdated: new Date(),
             });
           }
@@ -330,6 +409,61 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  async function tryAutoRedeemCodexReset() {
+    const config = loadConfig();
+    if (!config?.codexResets?.autoRedeem) return;
+
+    const codexState = states.find(s => s.provider === "openai-codex");
+    if (!codexState) return;
+
+    // Reset the flag when the weekly window recovers
+    if (codexState.sevenDayRemaining !== null && codexState.sevenDayRemaining > 0) {
+      codexRedeemAttempted = false;
+    }
+
+    // Only redeem if weekly is exhausted and we haven't tried yet
+    if (codexState.sevenDayRemaining !== 0) return;
+    if (codexState.resetsAvailable === 0) return;
+    if (codexRedeemAttempted) return;
+
+    codexRedeemAttempted = true;
+
+    const auth = loadAuth();
+    if (!auth) return;
+
+    const openaiAuth = await ensureOpenAIAccess(auth);
+    if (!openaiAuth?.access) return;
+
+    ctxRef?.ui.notify("pi-quota: weekly limit exhausted, redeeming saved reset...", "info");
+
+    const creditList = await listCodexResetCredits(openaiAuth.access);
+    if (!creditList || creditList.credits.length === 0) {
+      logError("No reset credits available despite reported count");
+      return;
+    }
+
+    const availableCredit = creditList.credits.find(c => c.status === "available" || !c.status);
+    if (!availableCredit) {
+      logError("No available reset credit found");
+      return;
+    }
+
+    const result = await consumeCodexResetCredit(openaiAuth.access, availableCredit.id);
+    if (!result) {
+      ctxRef?.ui.notify("pi-quota: failed to redeem reset", "warning");
+      return;
+    }
+
+    if (result.code === "reset") {
+      ctxRef?.ui.notify("pi-quota: saved reset redeemed successfully", "info");
+      await pollQuotaStatus();
+      updateWidget();
+    } else {
+      logError(`Reset redeem returned code: ${result.code}`);
+      ctxRef?.ui.notify(`pi-quota: reset redeem failed (${result.code})`, "warning");
+    }
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     if (checkTimer) {
       clearTimeout(checkTimer);
@@ -338,6 +472,7 @@ export default function (pi: ExtensionAPI) {
     states.length = 0;
     refreshNotified.clear();
     ctxRef = ctx;
+    codexRedeemAttempted = false;
 
     const config = loadConfig();
     let intervalMs = config?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -352,12 +487,14 @@ export default function (pi: ExtensionAPI) {
     const scheduleCheck = () => {
       checkTimer = setTimeout(async () => {
         await pollQuotaStatus();
+        await tryAutoRedeemCodexReset();
         updateWidget();
         scheduleCheck();
       }, intervalMs);
     };
 
     await pollQuotaStatus();
+    await tryAutoRedeemCodexReset();
     scheduleCheck();
 
     updateWidget();
