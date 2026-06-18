@@ -1,22 +1,19 @@
 /**
- * pi-quota — tracks Anthropic and OpenAI Codex subscription quota and notifies on reset via Telegram.
+ * pi-quota — tracks Anthropic and OpenAI Codex subscription quota and renders a widget.
  *
  * NOTE: This extension deliberately has no automated tests. It is a single-file extension whose
- * behaviour is dominated by external HTTP APIs (Anthropic, OpenAI Codex, Telegram) and pi runtime
- * events; it is verified manually by running it in pi. Do not add a test suite here.
+ * behaviour is dominated by external HTTP APIs (Anthropic, OpenAI Codex) and pi runtime events;
+ * it is verified manually by running it in pi. Do not add a test suite here.
  */
 
-import { readFileSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
 interface QuotaConfig {
-  botToken: string;
-  chatId: string;
   pollIntervalMs?: number;
-  updatePollIntervalMs?: number;
 }
 
 interface QuotaState {
@@ -39,16 +36,6 @@ type OAuthAuthRecord = {
 };
 
 type AuthFile = Record<string, OAuthAuthRecord>;
-
-type TelegramUpdate = {
-  update_id: number;
-  message?: {
-    text?: string;
-    chat?: { id: number | string };
-  };
-};
-
-type ResetWindow = "5h" | "7d";
 
 type OAuthTokenResponse = {
   access_token?: string;
@@ -77,19 +64,6 @@ type OpenAIUsageResponse = {
     secondary_window?: OpenAIUsageWindow;
   };
 };
-
-type TimerRecord = {
-  resetAt: number;
-  handle: ReturnType<typeof setTimeout>;
-};
-
-type Lease = {
-  pid: number;
-  host: string;
-  ts: number;
-};
-
-const LEASE_STALE_FACTOR = 3;
 
 const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
   anthropic: "claude",
@@ -159,10 +133,6 @@ function saveAuth(auth: AuthFile) {
   writeFileSync(authPath(), JSON.stringify(auth, null, 2));
 }
 
-function leaderPath() {
-  return join(homedir(), ".pi", "agent", "pi-quota.lock");
-}
-
 function logPath() {
   return join(homedir(), ".pi", "agent", "pi-quota.log");
 }
@@ -176,119 +146,16 @@ function logError(message: string, error?: unknown) {
   }
 }
 
-function readLease(): Lease | null {
-  try {
-    return JSON.parse(readFileSync(leaderPath(), "utf-8")) as Lease;
-  } catch {
-    return null;
-  }
-}
-
-function tryCreateLease(lease: Lease): boolean {
-  try {
-    writeFileSync(leaderPath(), JSON.stringify(lease), { flag: "wx" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function overwriteLease(lease: Lease) {
-  try {
-    writeFileSync(leaderPath(), JSON.stringify(lease));
-  } catch (error) {
-    logError("failed to write leader lock:", error);
-  }
-}
-
-function pidAlive(pid: number, host: string): boolean {
-  if (host !== hostname()) return true;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function leaseIsStale(lease: Lease, staleMs: number): boolean {
-  if (Date.now() - lease.ts > staleMs) return true;
-  return !pidAlive(lease.pid, lease.host);
-}
-
 export default function (pi: ExtensionAPI) {
   const states: QuotaState[] = [];
-  let config: QuotaConfig | null = null;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
-  let updateTimer: ReturnType<typeof setTimeout> | null = null;
-  let updateOffset: number | undefined;
-
   let ctxRef: ExtensionContext | null = null;
-  let isLeader = false;
-  let leaseStaleMs = 180000;
-  let botPollError: string | null = null;
-  const resetTimers = new Map<string, TimerRecord>();
-  const selfLease = (): Lease => ({ pid: process.pid, host: hostname(), ts: Date.now() });
-
-  function ownsLease(lease: Lease | null): boolean {
-    return !!lease && lease.pid === process.pid && lease.host === hostname();
-  }
-
-  function becomeLeader() {
-    const wasLeader = isLeader;
-    isLeader = true;
-    if (!wasLeader) syncResetTimers();
-  }
-
-  function becomeFollower() {
-    if (!isLeader) return;
-    isLeader = false;
-    resetTimers.forEach((timer) => clearTimeout(timer.handle));
-    resetTimers.clear();
-  }
-
-  function evaluateLeadership() {
-    const lease = readLease();
-
-    if (ownsLease(lease)) {
-      overwriteLease(selfLease());
-      becomeLeader();
-      return;
-    }
-
-    if (!lease) {
-      if (tryCreateLease(selfLease())) {
-        becomeLeader();
-      } else {
-        becomeFollower();
-      }
-      return;
-    }
-
-    if (leaseIsStale(lease, leaseStaleMs)) {
-      overwriteLease(selfLease());
-      if (ownsLease(readLease())) {
-        becomeLeader();
-      } else {
-        becomeFollower();
-      }
-      return;
-    }
-
-    becomeFollower();
-  }
 
   function buildWidgetLines(): WidgetSegment[][] {
     const providerStates = states.filter((s) => s.provider === "anthropic" || s.provider === "openai-codex");
     if (providerStates.length === 0) return [];
 
-    const statusLabel = isLeader ? "main" : "standby";
-    const errorSuffix = botPollError ? ` · telegram ${botPollError}` : "";
-
-    const statusLine: WidgetSegment[] = [{ role: "muted", text: `role: ${statusLabel}` }];
-    if (errorSuffix) statusLine.push({ role: "warning", text: errorSuffix });
-
-    const lines: WidgetSegment[][] = [statusLine];
+    const lines: WidgetSegment[][] = [];
     for (const state of providerStates) {
       const label = PROVIDER_LABELS[state.provider];
       const parts: string[] = [];
@@ -321,66 +188,6 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
-  function formatBotPollError(error: unknown): string {
-    const code = error instanceof Error && "cause" in error && error.cause && typeof error.cause === "object" && "code" in error.cause
-      ? String(error.cause.code)
-      : error instanceof Error && "code" in error
-        ? String(error.code)
-        : null;
-
-    if (code === "ETIMEDOUT") return "timeout";
-    if (error instanceof TypeError && error.message === "fetch failed") return "fetch failed";
-    if (error instanceof Error && error.message) return error.message;
-    return "failed";
-  }
-
-  function syncResetTimer(state: QuotaState, window: ResetWindow, reset: Date | null) {
-    const key = `${state.provider}:${window}`;
-    const existing = resetTimers.get(key);
-
-    if (!reset) {
-      if (existing) {
-        clearTimeout(existing.handle);
-        resetTimers.delete(key);
-      }
-      return;
-    }
-
-    if (!isLeader) {
-      if (existing) {
-        clearTimeout(existing.handle);
-        resetTimers.delete(key);
-      }
-      return;
-    }
-
-    const resetAt = reset.getTime();
-    if (existing && existing.resetAt === resetAt) return;
-    if (existing) clearTimeout(existing.handle);
-
-    const delay = Math.max(0, resetAt - Date.now());
-    const handle = setTimeout(async () => {
-      if (!isLeader) {
-        resetTimers.delete(key);
-        return;
-      }
-      const label = PROVIDER_LABELS[state.provider];
-      const message = `🔄 ${label} ${window} quota reset\n\n${formatQuotaStatus([state])}`;
-      if (await sendTelegram(config!, message)) {
-        resetTimers.delete(key);
-      }
-    }, delay);
-
-    resetTimers.set(key, { resetAt, handle });
-  }
-
-  function syncResetTimers() {
-    for (const state of states) {
-      syncResetTimer(state, "5h", state.fiveHourReset);
-      syncResetTimer(state, "7d", state.sevenDayReset);
-    }
-  }
-
   function updateState(parsed: QuotaState) {
     const existing = states.find((s) => s.provider === parsed.provider);
     if (!existing) {
@@ -393,25 +200,6 @@ export default function (pi: ExtensionAPI) {
     existing.sevenDayRemaining = parsed.sevenDayRemaining;
     existing.sevenDayReset = parsed.sevenDayReset;
     existing.lastUpdated = parsed.lastUpdated;
-  }
-
-  async function sendTelegram(quotaConfig: QuotaConfig, text: string): Promise<boolean> {
-    try {
-      const response = await fetch(`https://api.telegram.org/bot${quotaConfig.botToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: quotaConfig.chatId, text }),
-      });
-
-      if (!response.ok) {
-        logError(`Telegram API error: ${response.status}`);
-        return false;
-      }
-      return true;
-    } catch (error) {
-      logError("Failed to send Telegram message:", error);
-      return false;
-    }
   }
 
   async function ensureAnthropicAccess(auth: AuthFile): Promise<OAuthAuthRecord | undefined> {
@@ -543,103 +331,28 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function pollBotCommands() {
-    if (!config || !isLeader) return;
-    try {
-      const params = new URLSearchParams({ timeout: "0" });
-      if (updateOffset !== undefined) params.set("offset", String(updateOffset));
-
-      const response = await fetch(`https://api.telegram.org/bot${config.botToken}/getUpdates?${params.toString()}`);
-      if (!response.ok) {
-        botPollError = `HTTP ${response.status}`;
-        logError(`getUpdates failed: ${response.status}`);
-        updateWidget();
-        return;
-      }
-
-      if (botPollError) {
-        botPollError = null;
-        updateWidget();
-      }
-
-      const data = await response.json() as { result?: TelegramUpdate[] };
-      const updates = data.result ?? [];
-
-      for (const update of updates) {
-        updateOffset = update.update_id + 1;
-
-        const message = update.message;
-        if (!message?.text || message.chat?.id === undefined) continue;
-        if (String(message.chat.id) !== config.chatId) continue;
-
-        const command = message.text.trim().split(/\s+/)[0]?.split("@")[0];
-        if (command !== "/quota") continue;
-
-        await sendTelegram(config, formatQuotaStatus(states));
-      }
-    } catch (error) {
-      botPollError = formatBotPollError(error);
-      logError(`getUpdates error: ${botPollError}`);
-      updateWidget();
-    }
-  }
-
   pi.on("session_start", async (_event, ctx) => {
     states.length = 0;
-    config = loadConfig();
     ctxRef = ctx;
 
-    if (!config) {
-      ctx.ui.notify("pi-quota: No config found in settings.json", "warning");
-      return;
-    }
-
-    if (!config.botToken || !config.chatId) {
-      ctx.ui.notify("pi-quota: botToken and chatId required in settings.json", "warning");
-      return;
-    }
-
-    if (typeof config.botToken !== "string" || typeof config.chatId !== "string") {
-      ctx.ui.notify("pi-quota: botToken and chatId must be strings", "error");
-      return;
-    }
-
-    if (config.pollIntervalMs !== undefined && (typeof config.pollIntervalMs !== "number" || config.pollIntervalMs < 60000)) {
+    const config = loadConfig();
+    if (config?.pollIntervalMs !== undefined && (typeof config.pollIntervalMs !== "number" || config.pollIntervalMs < 60000)) {
       ctx.ui.notify("pi-quota: pollIntervalMs must be >= 60000 (1 minute)", "error");
       return;
     }
 
-    if (config.updatePollIntervalMs !== undefined && (typeof config.updatePollIntervalMs !== "number" || config.updatePollIntervalMs < 10000)) {
-      ctx.ui.notify("pi-quota: updatePollIntervalMs must be >= 10000 (10 seconds)", "error");
-      return;
-    }
-
-    const intervalMs = config.pollIntervalMs ?? 600000;
-    const updateIntervalMs = config.updatePollIntervalMs ?? 60000;
-    leaseStaleMs = updateIntervalMs * LEASE_STALE_FACTOR;
+    const intervalMs = config?.pollIntervalMs ?? 600000;
 
     const scheduleCheck = () => {
       checkTimer = setTimeout(async () => {
         await pollQuotaStatus();
-        syncResetTimers();
         updateWidget();
         scheduleCheck();
       }, intervalMs);
     };
 
-    const scheduleUpdates = () => {
-      updateTimer = setTimeout(async () => {
-        evaluateLeadership();
-        await pollBotCommands();
-        scheduleUpdates();
-      }, updateIntervalMs);
-    };
-
-    evaluateLeadership();
     await pollQuotaStatus();
-    syncResetTimers();
     scheduleCheck();
-    scheduleUpdates();
 
     updateWidget();
     ctx.ui.notify("pi-quota: tracking started", "info");
@@ -650,19 +363,5 @@ export default function (pi: ExtensionAPI) {
       clearTimeout(checkTimer);
       checkTimer = null;
     }
-    if (updateTimer) {
-      clearTimeout(updateTimer);
-      updateTimer = null;
-    }
-    resetTimers.forEach((timer) => clearTimeout(timer.handle));
-    resetTimers.clear();
-    if (ownsLease(readLease())) {
-      try {
-        unlinkSync(leaderPath());
-      } catch {
-        // already gone
-      }
-    }
-    isLeader = false;
   });
 }

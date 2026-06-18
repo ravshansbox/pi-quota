@@ -3,10 +3,8 @@
 ## Overview
 
 A pi extension that tracks Anthropic and OpenAI Codex subscription quota usage by
-polling each provider's OAuth usage endpoint, renders a widget for the active
-provider, and sends Telegram notifications when a quota window resets. When
-multiple pi instances run on the same machine, a file-lock leader election
-ensures only one instance sends Telegram traffic.
+polling each provider's OAuth usage endpoint, and renders a widget for each
+provider that has a stored OAuth credential.
 
 ## Location
 
@@ -16,8 +14,7 @@ ensures only one instance sends Telegram traffic.
 
 ```
 pi-quota/
-└── index.ts          # Extension entry: events, polling, OAuth refresh,
-                      # leader election, Telegram, widget, commands
+└── index.ts          # Extension entry: events, polling, OAuth refresh, widget
 ```
 
 The extension is a single file. There is no separate `quota-tracker.ts`.
@@ -29,20 +26,18 @@ All settings under the `quota` key in `~/.pi/agent/settings.json`:
 ```json
 {
   "quota": {
-    "botToken": "123456:ABC-DEF...",
-    "chatId": "987654321",
-    "pollIntervalMs": 600000,
-    "updatePollIntervalMs": 60000
+    "pollIntervalMs": 600000
   }
 }
 ```
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `botToken` | Yes | — | Telegram Bot API token |
-| `chatId` | Yes | — | Telegram chat ID for notifications |
 | `pollIntervalMs` | No | 600000 | Quota polling interval in ms, minimum 60000 |
-| `updatePollIntervalMs` | No | 60000 | Telegram command / leadership tick in ms, minimum 10000 |
+
+OAuth credentials for Anthropic and OpenAI Codex are read from
+`~/.pi/agent/auth.json`. Neither provider is required: a missing credential just
+means that provider is not polled and not shown in the widget.
 
 ## Components
 
@@ -81,7 +76,7 @@ log an error and fall back to the existing record.
 
 ```typescript
 interface QuotaState {
-  provider: "anthropic" | "openai";
+  provider: "anthropic" | "openai-codex";
   fiveHourRemaining: number | null;
   fiveHourReset: Date | null;
   sevenDayRemaining: number | null;
@@ -93,44 +88,12 @@ interface QuotaState {
 State is held in memory for the lifetime of the session and refreshed on each
 poll. There is one `QuotaState` per provider.
 
-### 4. Reset Notifications
+### 4. Widget
 
-For each known reset time, the leader schedules a one-shot `setTimeout`
-(`syncResetTimer`). When a `5h` or `7d` window resets, the leader sends a
-Telegram message containing the current status for that provider. Timers are
-keyed by `provider:window` and rescheduled when the provider reports a new reset
-timestamp. Only the leader holds reset timers; followers clear theirs.
-
-### 5. Leader Election
-
-A lock file at `~/.pi/agent/pi-quota.lock` records `{ pid, host, ts }`.
-On every `updatePollIntervalMs` tick, `evaluateLeadership` runs:
-
-- If the lock is owned by this process, renew its timestamp and remain leader.
-- If there is no lock, attempt an exclusive create (`wx`); success becomes leader.
-- If the lock is stale — no renewal for `LEASE_STALE_FACTOR` (3) ×
-  `updatePollIntervalMs`, or the recorded pid is no longer alive on the same
-  host — overwrite it and re-read to confirm ownership.
-- Otherwise become a follower.
-
-Only the leader polls Telegram for `/quota` commands, schedules reset timers, and
-sends messages. Followers still poll usage and render their own widget. On clean
-shutdown the leader removes the lock. Election is best-effort and assumes
-instances share one machine and home directory.
-
-### 6. Telegram
-
-`sendTelegram` issues a single `POST` to the Bot API `sendMessage` method and
-returns whether it succeeded. `pollBotCommands` (leader only) calls `getUpdates`
-with `timeout=0`, advances the update offset, and replies to `/quota` messages
-that originate from the configured `chatId`.
-
-### 7. Widget and Commands
-
-- A widget is shown below the prompt when the active model provider is
-  `anthropic` or `openai-codex`, displaying that provider's status line. It is
-  updated on `session_start`, `model_select`, and each poll.
-- `/quota` (in pi) notifies the current status for all tracked providers.
+`updateWidget` sets (or clears) a pi widget named `pi-quota` for every tracked
+provider. It runs on `session_start` and after each poll. The widget renders
+each provider's compact status line (see Output Format); the provider prefix is
+omitted because pi already displays the active provider in the prompt chrome.
 
 ## Output Format
 
@@ -140,9 +103,8 @@ One compact line per provider, e.g.:
 openai-codex: 7d: 89% left (1d 13h), 5h: 30% left (4h 39m)
 ```
 
-The `/quota` command and Telegram messages use this `formatQuotaStatus` output.
-The widget calls it with the provider prefix suppressed (pi already shows the
-active provider), so it renders just `7d: ... , 5h: ...`.
+`formatQuotaStatus` produces this output. The widget calls it with the provider
+prefix suppressed, so it renders just `7d: ... , 5h: ...`.
 
 ## Dependencies
 
@@ -152,5 +114,5 @@ extension API.
 ## Testing
 
 This extension deliberately has no automated tests. Its behaviour is dominated
-by external HTTP APIs (Anthropic, OpenAI Codex, Telegram) and pi runtime events;
-it is verified manually by running it in pi.
+by external HTTP APIs (Anthropic, OpenAI Codex) and pi runtime events; it is
+verified manually by running it in pi.
