@@ -180,7 +180,7 @@ export default function (pi: ExtensionAPI) {
     ctxRef.ui.setWidget("pi-quota", (_tui, theme) => {
       const body = lines.map((line) => line.map((seg) => theme.fg(seg.role, seg.text)).join("")).join("\n");
       return new Text(body, 0, 0);
-    }, { placement: "belowEditor" });
+    }, { placement: "aboveEditor" });
   }
 
   function updateState(parsed: QuotaState) {
