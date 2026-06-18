@@ -498,7 +498,6 @@ export default function (pi: ExtensionAPI) {
     scheduleCheck();
 
     updateWidget();
-    ctx.ui.notify("pi-quota: tracking started", "info");
   });
 
   pi.on("session_shutdown", async () => {
