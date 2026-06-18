@@ -49,7 +49,7 @@ credentials simply mean that provider is not polled.
 - `loadConfig` reads and validates the `quota` block.
 - `loadAuth` / `saveAuth` read and write `~/.pi/agent/auth.json`.
 - `formatResetTime` renders a `Date` as `Nd Nh` / `Nh Nm` / `Nm`.
-- `formatQuotaStatus` renders one compact line per provider, used by the widget.
+- `buildWidgetLines` produces the per-provider widget lines, each prefixed with the short label `claude` (Anthropic) or `codex` (OpenAI Codex).
 
 ## Task 2: OAuth token refresh
 

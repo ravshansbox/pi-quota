@@ -92,24 +92,18 @@ poll. There is one `QuotaState` per provider.
 
 `updateWidget` sets (or clears) a pi widget named `pi-quota` for every tracked
 provider. It runs on `session_start` and after each poll. The widget renders
-each provider's compact status line (see Output Format); the provider prefix is
-omitted because pi already displays the active provider in the prompt chrome.
+each provider's compact status line (see Output Format), prefixed with the
+short provider label (`claude` for Anthropic, `codex` for OpenAI Codex).
 
 ## Output Format
 
-One compact line per provider, e.g.:
-
-```
-openai-codex: 7d: 89% left (1d 13h), 5h: 30% left (4h 39m)
-```
-
-`formatQuotaStatus` produces this output. The widget calls it with the provider
-prefix suppressed, so it renders just `7d: ... , 5h: ...`.
+One compact line per provider, e.g. `claude: 7d: 89% left (1d 13h), 5h: 30% left (4h 39m)` for Anthropic and `codex: 7d: 89% left (1d 13h), 5h: 30% left (4h 39m)` for OpenAI Codex. Each line is prefixed with the short provider label. The widget builds its output via the `buildWidgetLines` helper.
 
 ## Dependencies
 
 None beyond Node.js built-ins (`fetch`, `fs`, `path`, `os`) and the pi
-extension API.
+extension API. Poll and token-refresh errors are appended to
+`~/.pi/agent/pi-quota.log`.
 
 ## Testing
 
