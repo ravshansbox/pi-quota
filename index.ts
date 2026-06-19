@@ -6,7 +6,7 @@
  * it is verified manually by running it in pi. Do not add a test suite here.
  */
 
-import { readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -111,10 +111,10 @@ function formatResetTime(reset: Date): string {
   return "now";
 }
 
-function loadConfig(): QuotaConfig | null {
+async function loadConfig(): Promise<QuotaConfig | null> {
   try {
     const settingsPath = join(homedir(), ".pi", "agent", "settings.json");
-    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     return settings.quota ?? null;
   } catch {
     return null;
@@ -125,33 +125,33 @@ function authPath() {
   return join(homedir(), ".pi", "agent", "auth.json");
 }
 
-function loadAuth(): AuthFile | null {
+async function loadAuth(): Promise<AuthFile | null> {
   try {
-    return JSON.parse(readFileSync(authPath(), "utf-8")) as AuthFile;
+    return JSON.parse(await readFile(authPath(), "utf-8")) as AuthFile;
   } catch {
     return null;
   }
 }
 
-function saveAuth(auth: AuthFile) {
-  writeFileSync(authPath(), JSON.stringify(auth, null, 2));
+async function saveAuth(auth: AuthFile): Promise<void> {
+  await writeFile(authPath(), JSON.stringify(auth, null, 2));
 }
 
-function persistAuthRecord(provider: string, record: OAuthAuthRecord) {
-  const current = loadAuth() ?? {};
+async function persistAuthRecord(provider: string, record: OAuthAuthRecord): Promise<void> {
+  const current = await loadAuth() ?? {};
   current[provider] = record;
-  saveAuth(current);
+  await saveAuth(current);
 }
 
 function logPath() {
   return join(homedir(), ".pi", "agent", "pi-quota.log");
 }
 
-function logError(message: string, error?: unknown) {
+async function logError(message: string, error?: unknown): Promise<void> {
   const detail = error instanceof Error ? error.stack ?? error.message : error !== undefined ? String(error) : "";
   const line = `[${new Date().toISOString()}] ${message}${detail ? ` ${detail}` : ""}\n`;
   try {
-    appendFileSync(logPath(), line);
+    await appendFile(logPath(), line);
   } catch {
   }
 }
@@ -251,7 +251,7 @@ export default function (pi: ExtensionAPI) {
       refresh: data.refresh_token ?? record.refresh,
       expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
     };
-    persistAuthRecord("anthropic", auth.anthropic);
+    await persistAuthRecord("anthropic", auth.anthropic);
     notifyRefreshOnce("anthropic", "pi-quota: refreshed Anthropic auth");
     return auth.anthropic;
   }
@@ -284,7 +284,7 @@ export default function (pi: ExtensionAPI) {
       refresh: data.refresh_token ?? record.refresh,
       expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
     };
-    persistAuthRecord("openai-codex", auth["openai-codex"]);
+    await persistAuthRecord("openai-codex", auth["openai-codex"]);
     notifyRefreshOnce("openai-codex", "pi-quota: refreshed OpenAI Codex auth");
     return auth["openai-codex"];
   }
@@ -341,7 +341,7 @@ export default function (pi: ExtensionAPI) {
 
   async function pollQuotaStatus() {
     try {
-      const auth = loadAuth();
+      const auth = await loadAuth();
       if (!auth) return;
 
       const anthropicAuth = await ensureAnthropicAccess(auth);
@@ -410,7 +410,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function tryAutoRedeemCodexReset() {
-    const config = loadConfig();
+    const config = await loadConfig();
     if (!config?.codexResets?.autoRedeem) return;
 
     const codexState = states.find(s => s.provider === "openai-codex");
@@ -428,7 +428,7 @@ export default function (pi: ExtensionAPI) {
 
     codexRedeemAttempted = true;
 
-    const auth = loadAuth();
+    const auth = await loadAuth();
     if (!auth) return;
 
     const openaiAuth = await ensureOpenAIAccess(auth);
@@ -474,7 +474,7 @@ export default function (pi: ExtensionAPI) {
     ctxRef = ctx;
     codexRedeemAttempted = false;
 
-    const config = loadConfig();
+    const config = await loadConfig();
     let intervalMs = config?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     if (typeof intervalMs !== "number" || intervalMs < MIN_POLL_INTERVAL_MS) {
       ctx.ui.notify(
@@ -493,11 +493,14 @@ export default function (pi: ExtensionAPI) {
       }, intervalMs);
     };
 
-    await pollQuotaStatus();
-    await tryAutoRedeemCodexReset();
-    scheduleCheck();
+    const refresh = async () => {
+      await pollQuotaStatus();
+      await tryAutoRedeemCodexReset();
+      updateWidget();
+    };
 
-    updateWidget();
+    void refresh();
+    scheduleCheck();
   });
 
   pi.on("session_shutdown", async () => {

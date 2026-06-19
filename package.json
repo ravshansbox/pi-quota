@@ -11,6 +11,11 @@
     "typescript": "^6.0.3"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test"
   }
 }
