@@ -13,7 +13,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 
 interface QuotaConfig {
-  pollIntervalMs?: number;
   codexResets?: {
     autoRedeem?: boolean;
   };
@@ -90,8 +89,15 @@ const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
 };
 
 const REQUEST_TIMEOUT_MS = 30_000;
-const DEFAULT_POLL_INTERVAL_MS = 600_000;
-const MIN_POLL_INTERVAL_MS = 60_000;
+
+function nextMarkAfter(time: Date): Date {
+  const next = new Date(time.getTime());
+  next.setSeconds(0, 0);
+  const minute = next.getMinutes();
+  const bump = 10 - (minute % 10);
+  next.setMinutes(minute + (bump === 0 ? 10 : bump));
+  return next;
+}
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, Math.round(value)));
@@ -474,23 +480,15 @@ export default function (pi: ExtensionAPI) {
     ctxRef = ctx;
     codexRedeemAttempted = false;
 
-    const config = await loadConfig();
-    let intervalMs = config?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-    if (typeof intervalMs !== "number" || intervalMs < MIN_POLL_INTERVAL_MS) {
-      ctx.ui.notify(
-        `pi-quota: pollIntervalMs must be a number >= ${MIN_POLL_INTERVAL_MS}; using default ${DEFAULT_POLL_INTERVAL_MS}`,
-        "warning",
-      );
-      intervalMs = DEFAULT_POLL_INTERVAL_MS;
-    }
-
     const scheduleCheck = () => {
+      const next = nextMarkAfter(new Date());
+      const delay = Math.max(0, next.getTime() - Date.now());
       checkTimer = setTimeout(async () => {
         await pollQuotaStatus();
         await tryAutoRedeemCodexReset();
         updateWidget();
         scheduleCheck();
-      }, intervalMs);
+      }, delay);
     };
 
     const refresh = async () => {
