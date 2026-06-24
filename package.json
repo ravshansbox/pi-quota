@@ -2,6 +2,11 @@
   "name": "pi-quota",
   "version": "0.1.0",
   "private": true,
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "*",
