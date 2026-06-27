@@ -626,8 +626,16 @@ export default function (pi: ExtensionAPI) {
           continue;
         }
         if (newResetMs > prev) {
-          const handled = await attemptNotify(state, window, newResetMs, botToken, chatId);
-          if (handled) seen[window] = newResetMs;
+          // A genuine rollover only happens once the previously-known reset
+          // instant has actually elapsed. A reset time that keeps sliding
+          // forward while still in the future is a rolling window (e.g. Codex),
+          // not a reset — advance the baseline silently without notifying.
+          if (prev <= Date.now()) {
+            const handled = await attemptNotify(state, window, newResetMs, botToken, chatId);
+            if (handled) seen[window] = newResetMs;
+          } else {
+            seen[window] = newResetMs;
+          }
         }
       }
     }
