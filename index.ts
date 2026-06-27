@@ -102,6 +102,10 @@ const WINDOW_LABELS: Record<WindowKey, string> = {
 
 const RESET_TIMER_BUFFER_MS = 30_000;
 const LOCK_STALE_MS = 60_000;
+// Minimum upward jump in remaining quota (percentage points) that counts as a
+// window reset. Distinguishes a genuine rollover (e.g. 30% -> 100%) from the
+// gradual recovery of a rolling window (a few points per poll).
+const RESET_JUMP_THRESHOLD = 50;
 
 type NotifiedRecord = Record<string, Partial<Record<WindowKey, number>>>;
 
@@ -386,7 +390,7 @@ export default function (pi: ExtensionAPI) {
   let ctxRef: ExtensionContext | null = null;
   let codexRedeemAttempted = false;
 
-  const lastSeenReset: Record<string, Record<WindowKey, number | null>> = {
+  const lastSeenRemaining: Record<string, Record<WindowKey, number | null>> = {
     anthropic: { fiveHour: null, sevenDay: null },
     "openai-codex": { fiveHour: null, sevenDay: null },
   };
@@ -614,29 +618,22 @@ export default function (pi: ExtensionAPI) {
     const chatId = config.telegramChatId!;
 
     for (const state of states) {
-      const seen = lastSeenReset[state.provider];
+      const seen = lastSeenRemaining[state.provider];
       if (!seen) continue;
       for (const window of ["fiveHour", "sevenDay"] as const) {
-        const resetDate = window === "fiveHour" ? state.fiveHourReset : state.sevenDayReset;
-        if (!resetDate) continue;
-        const newResetMs = resetDate.getTime();
+        const remaining = window === "fiveHour" ? state.fiveHourRemaining : state.sevenDayRemaining;
+        if (remaining === null) continue;
         const prev = seen[window];
-        if (prev === null) {
-          seen[window] = newResetMs;
-          continue;
-        }
-        if (newResetMs > prev) {
-          // A genuine rollover only happens once the previously-known reset
-          // instant has actually elapsed. A reset time that keeps sliding
-          // forward while still in the future is a rolling window (e.g. Codex),
-          // not a reset — advance the baseline silently without notifying.
-          if (prev <= Date.now()) {
-            const handled = await attemptNotify(state, window, newResetMs, botToken, chatId);
-            if (handled) seen[window] = newResetMs;
-          } else {
-            seen[window] = newResetMs;
-          }
-        }
+        seen[window] = remaining;
+        if (prev === null) continue;
+        // A reset is a large upward jump in remaining quota. Gradual recovery of
+        // a rolling window (a few points per poll) stays below the threshold.
+        if (remaining - prev < RESET_JUMP_THRESHOLD) continue;
+        // reset_at is the dedup epoch: the notified record skips a (re)send when
+        // it already holds a timestamp >= the current window's reset time.
+        const resetDate = window === "fiveHour" ? state.fiveHourReset : state.sevenDayReset;
+        const epochMs = resetDate ? resetDate.getTime() : Date.now();
+        await attemptNotify(state, window, epochMs, botToken, chatId);
       }
     }
   }
@@ -932,8 +929,8 @@ export default function (pi: ExtensionAPI) {
     clearResetTimers();
     states.length = 0;
     refreshNotified.clear();
-    lastSeenReset.anthropic = { fiveHour: null, sevenDay: null };
-    lastSeenReset["openai-codex"] = { fiveHour: null, sevenDay: null };
+    lastSeenRemaining.anthropic = { fiveHour: null, sevenDay: null };
+    lastSeenRemaining["openai-codex"] = { fiveHour: null, sevenDay: null };
     ctxRef = ctx;
     codexRedeemAttempted = false;
     heartbeatGen++;
