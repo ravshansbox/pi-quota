@@ -6,10 +6,9 @@
  * it is verified manually by running it in pi. Do not add a test suite here.
  */
 
-import { readFile, writeFile, appendFile, unlink, rename } from "node:fs/promises";
+import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import { watch, type FSWatcher } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
@@ -91,25 +90,6 @@ const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
-type LeaderRecord = {
-  pid: number;
-  hostname: string;
-  heartbeatAt: number;
-};
-
-type SerializedQuotaState = {
-  provider: QuotaState["provider"];
-  fiveHourRemaining: number | null;
-  fiveHourReset: string | null;
-  sevenDayRemaining: number | null;
-  sevenDayReset: string | null;
-  resetsAvailable: number;
-  lastUpdated: string;
-};
-
-const HEARTBEAT_INTERVAL_MS = 20_000;
-const LEASE_STALE_MS = 60_000;
-
 function nextMarkAfter(time: Date): Date {
   const next = new Date(time.getTime());
   next.setSeconds(0, 0);
@@ -173,106 +153,6 @@ function logPath() {
   return join(homedir(), ".pi", "agent", "pi-quota.log");
 }
 
-function leaderPath() {
-  return join(homedir(), ".pi", "agent", "pi-quota-leader.json");
-}
-
-function statePath() {
-  return join(homedir(), ".pi", "agent", "pi-quota-state.json");
-}
-
-function serializeStates(states: QuotaState[]): SerializedQuotaState[] {
-  return states.map((s) => ({
-    provider: s.provider,
-    fiveHourRemaining: s.fiveHourRemaining,
-    fiveHourReset: s.fiveHourReset ? s.fiveHourReset.toISOString() : null,
-    sevenDayRemaining: s.sevenDayRemaining,
-    sevenDayReset: s.sevenDayReset ? s.sevenDayReset.toISOString() : null,
-    resetsAvailable: s.resetsAvailable,
-    lastUpdated: s.lastUpdated.toISOString(),
-  }));
-}
-
-function deserializeStates(raw: SerializedQuotaState[]): QuotaState[] {
-  return raw.map((s) => ({
-    provider: s.provider,
-    fiveHourRemaining: s.fiveHourRemaining,
-    fiveHourReset: s.fiveHourReset ? new Date(s.fiveHourReset) : null,
-    sevenDayRemaining: s.sevenDayRemaining,
-    sevenDayReset: s.sevenDayReset ? new Date(s.sevenDayReset) : null,
-    resetsAvailable: s.resetsAvailable,
-    lastUpdated: new Date(s.lastUpdated),
-  }));
-}
-
-async function writeSharedState(states: QuotaState[]): Promise<void> {
-  try {
-    // Write to a temp file then atomically rename, so a standby watcher never
-    // observes a truncated/partially-written state file.
-    const tmp = `${statePath()}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify(serializeStates(states), null, 2));
-    await rename(tmp, statePath());
-  } catch (error) {
-    await logError("Write shared state error:", error);
-  }
-}
-
-async function readSharedState(): Promise<QuotaState[] | null> {
-  try {
-    const parsed = JSON.parse(await readFile(statePath(), "utf-8"));
-    if (!Array.isArray(parsed)) return null;
-    return deserializeStates(parsed as SerializedQuotaState[]);
-  } catch {
-    return null;
-  }
-}
-
-async function readLeader(): Promise<LeaderRecord | null> {
-  try {
-    const parsed = JSON.parse(await readFile(leaderPath(), "utf-8"));
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-    if (typeof (parsed as LeaderRecord).heartbeatAt !== "number" || !Number.isFinite((parsed as LeaderRecord).heartbeatAt)) return null;
-    return parsed as LeaderRecord;
-  } catch {
-    return null;
-  }
-}
-
-async function writeLeader(record: LeaderRecord): Promise<void> {
-  await writeFile(leaderPath(), JSON.stringify(record, null, 2));
-}
-
-// Try to atomically claim leadership. Returns true if this process now holds it.
-async function claimLeader(record: LeaderRecord): Promise<boolean> {
-  const payload = JSON.stringify(record, null, 2);
-  try {
-    await writeFile(leaderPath(), payload, { flag: "wx" });
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
-      await logError("Leader claim error:", error);
-      return false;
-    }
-    const existing = await readLeader();
-    const stale = !existing || Date.now() - existing.heartbeatAt > LEASE_STALE_MS;
-    if (!stale) return false;
-    await unlink(leaderPath()).catch(() => {});
-    try {
-      await writeFile(leaderPath(), payload, { flag: "wx" });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-async function releaseLeader(pid: number, host: string): Promise<void> {
-  const existing = await readLeader();
-  if (existing && existing.pid === pid && existing.hostname === host) {
-    await unlink(leaderPath()).catch(() => {});
-  }
-}
-
 async function logError(message: string, error?: unknown): Promise<void> {
   const detail = error instanceof Error ? error.stack ?? error.message : error !== undefined ? String(error) : "";
   const line = `[${new Date().toISOString()}] ${message}${detail ? ` ${detail}` : ""}\n`;
@@ -288,14 +168,7 @@ export default function (pi: ExtensionAPI) {
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let ctxRef: ExtensionContext | null = null;
   let codexRedeemAttempted = false;
-
   let cycleRunning = false;
-  let isMain = false;
-  let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
-  let stateWatcher: FSWatcher | null = null;
-  const selfPid = process.pid;
-  const selfHost = hostname();
-  let heartbeatGen = 0;
 
   function notifyRefreshOnce(provider: string, message: string) {
     if (refreshNotified.has(provider)) return;
@@ -305,7 +178,6 @@ export default function (pi: ExtensionAPI) {
 
   function buildWidgetLines(): WidgetSegment[][] {
     const lines: WidgetSegment[][] = [];
-    lines.push([{ role: "muted", text: `quota: ${isMain ? "main" : "standby"}` }]);
     for (const state of states) {
       const label = PROVIDER_LABELS[state.provider];
       const parts: string[] = [];
@@ -472,130 +344,6 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function runCycle() {
-    // Only the main instance polls providers; standbys render from shared state.
-    if (!isMain) return;
-    // Skip if a cycle is already in flight; the 10-minute poll ensures
-    // data is always fresh.
-    if (cycleRunning) return;
-    cycleRunning = true;
-    try {
-      await pollQuotaStatus();
-      // Re-check leadership between each privileged step: a heartbeat may have
-      // demoted us during network I/O, and only main may redeem/persist.
-      if (!isMain) return;
-      await tryAutoRedeemCodexReset();
-      if (!isMain) return;
-      await writeSharedState(states);
-      updateWidget();
-    } catch (error) {
-      // Never let a cycle throw: the poll loop re-arms itself after runCycle.
-      await logError("Run cycle error:", error);
-    } finally {
-      cycleRunning = false;
-    }
-  }
-
-  function stopWatcher() {
-    if (stateWatcher) {
-      stateWatcher.close();
-      stateWatcher = null;
-    }
-  }
-
-  async function refreshFromSharedState() {
-    const shared = await readSharedState();
-    if (!shared) return;
-    states.length = 0;
-    for (const s of shared) states.push(s);
-    updateWidget();
-  }
-
-  function startWatcher() {
-    stopWatcher();
-    void refreshFromSharedState();
-    // Watch the containing directory, not the state file itself: a fresh standby
-    // may start before main has created the file, and watching a missing file
-    // throws ENOENT. The agent dir always exists.
-    try {
-      const dir = join(homedir(), ".pi", "agent");
-      stateWatcher = watch(dir, (_event, filename) => {
-        if (!filename || filename === "pi-quota-state.json") {
-          void refreshFromSharedState();
-        }
-      });
-      stateWatcher.on("error", (error) => {
-        void logError("State watcher error:", error);
-      });
-    } catch (error) {
-      void logError("State watch error:", error);
-    }
-  }
-
-  function scheduleCheck() {
-    const next = nextMarkAfter(new Date());
-    const delay = Math.max(0, next.getTime() - Date.now());
-    checkTimer = setTimeout(async () => {
-      await runCycle();
-      if (isMain) scheduleCheck();
-    }, delay);
-  }
-
-  async function becomeMain() {
-    if (isMain) return;
-    isMain = true;
-    stopWatcher();
-    updateWidget();
-    void runCycle();
-    scheduleCheck();
-  }
-
-  async function becomeStandby() {
-    if (isMain) {
-      isMain = false;
-      if (checkTimer) { clearTimeout(checkTimer); checkTimer = null; }
-    }
-    startWatcher();
-    updateWidget();
-  }
-
-  async function heartbeatTick() {
-    const record: LeaderRecord = { pid: selfPid, hostname: selfHost, heartbeatAt: Date.now() };
-    if (isMain) {
-      const existing = await readLeader();
-      if (!existing || existing.pid !== selfPid || existing.hostname !== selfHost) {
-        // Lost ownership (taken over, or our lease was cleared) — step down
-        // rather than clobbering whoever now holds the lease.
-        await becomeStandby();
-        return;
-      }
-      // Note: there is a small TOCTOU window between this read and the write below
-      // where a stale-takeover by another instance could be overwritten. That
-      // instance will detect the lost ownership on its next heartbeat (<=20s) and
-      // step down, so double-main is bounded — matching the design's accepted
-      // sleep/wake tolerance. The redeem risk is limited by the short window and
-      // leadership re-checks in runCycle.
-      await writeLeader(record);
-    } else {
-      const won = await claimLeader(record);
-      if (won) await becomeMain();
-    }
-  }
-
-  function scheduleHeartbeat() {
-    if (heartbeatTimer) clearTimeout(heartbeatTimer);
-    const gen = heartbeatGen;
-    heartbeatTimer = setTimeout(async () => {
-      if (gen !== heartbeatGen) return; // a newer session/shutdown superseded this loop
-      try {
-        await heartbeatTick();
-      } catch (error) {
-        await logError("Heartbeat error:", error);
-      }
-      if (gen === heartbeatGen) scheduleHeartbeat();
-    }, HEARTBEAT_INTERVAL_MS);
-  }
-
   async function pollQuotaStatus() {
     try {
       const auth = await loadAuth();
@@ -721,6 +469,29 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  async function runCycle() {
+    if (cycleRunning) return;
+    cycleRunning = true;
+    try {
+      await pollQuotaStatus();
+      await tryAutoRedeemCodexReset();
+      updateWidget();
+    } catch (error) {
+      await logError("Run cycle error:", error);
+    } finally {
+      cycleRunning = false;
+    }
+  }
+
+  function scheduleCheck() {
+    const next = nextMarkAfter(new Date());
+    const delay = Math.max(0, next.getTime() - Date.now());
+    checkTimer = setTimeout(async () => {
+      await runCycle();
+      scheduleCheck();
+    }, delay);
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     if (checkTimer) {
       clearTimeout(checkTimer);
@@ -730,17 +501,9 @@ export default function (pi: ExtensionAPI) {
     refreshNotified.clear();
     ctxRef = ctx;
     codexRedeemAttempted = false;
-    heartbeatGen++;
-    if (heartbeatTimer) { clearTimeout(heartbeatTimer); heartbeatTimer = null; }
-    stopWatcher();
-    // If this process was main in a previous session, drop our own lease so the
-    // fresh election starts clean instead of seeing our stale self-owned record.
-    await releaseLeader(selfPid, selfHost);
-    isMain = false;
 
-    scheduleHeartbeat();
-    await heartbeatTick();
-    if (!isMain) startWatcher();
+    await runCycle();
+    scheduleCheck();
   });
 
   pi.on("session_shutdown", async () => {
@@ -748,13 +511,5 @@ export default function (pi: ExtensionAPI) {
       clearTimeout(checkTimer);
       checkTimer = null;
     }
-    if (heartbeatTimer) {
-      clearTimeout(heartbeatTimer);
-      heartbeatTimer = null;
-    }
-    heartbeatGen++;
-    stopWatcher();
-    if (isMain) await releaseLeader(selfPid, selfHost);
-    isMain = false; // ensure any in-flight check/cycle callback won't act as leader
   });
 }
