@@ -6,7 +6,7 @@
  * it is verified manually by running it in pi. Do not add a test suite here.
  */
 
-import { readFile, writeFile, appendFile, open, unlink, stat, rename } from "node:fs/promises";
+import { readFile, writeFile, appendFile, unlink, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { watch, type FSWatcher } from "node:fs";
 import { homedir, hostname } from "node:os";
@@ -17,8 +17,6 @@ interface QuotaConfig {
   codexResets?: {
     autoRedeem?: boolean;
   };
-  telegramBotToken?: string;
-  telegramChatId?: string;
 }
 
 interface QuotaState {
@@ -92,22 +90,6 @@ const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
 };
 
 const REQUEST_TIMEOUT_MS = 30_000;
-
-type WindowKey = "fiveHour" | "sevenDay";
-
-const WINDOW_LABELS: Record<WindowKey, string> = {
-  fiveHour: "5h",
-  sevenDay: "7d",
-};
-
-const RESET_TIMER_BUFFER_MS = 30_000;
-const LOCK_STALE_MS = 60_000;
-// Minimum upward jump in remaining quota (percentage points) that counts as a
-// window reset. Distinguishes a genuine rollover (e.g. 30% -> 100%) from the
-// gradual recovery of a rolling window (a few points per poll).
-const RESET_JUMP_THRESHOLD = 50;
-
-type NotifiedRecord = Record<string, Partial<Record<WindowKey, number>>>;
 
 type LeaderRecord = {
   pid: number;
@@ -191,14 +173,6 @@ function logPath() {
   return join(homedir(), ".pi", "agent", "pi-quota.log");
 }
 
-function notifiedPath() {
-  return join(homedir(), ".pi", "agent", "pi-quota-notified.json");
-}
-
-function lockPath() {
-  return join(homedir(), ".pi", "agent", "pi-quota-notified.lock");
-}
-
 function leaderPath() {
   return join(homedir(), ".pi", "agent", "pi-quota-leader.json");
 }
@@ -253,48 +227,6 @@ async function readSharedState(): Promise<QuotaState[] | null> {
   }
 }
 
-async function loadNotified(): Promise<NotifiedRecord> {
-  try {
-    const parsed = JSON.parse(await readFile(notifiedPath(), "utf-8"));
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    return parsed as NotifiedRecord;
-  } catch {
-    return {};
-  }
-}
-
-async function saveNotified(record: NotifiedRecord): Promise<void> {
-  await writeFile(notifiedPath(), JSON.stringify(record, null, 2));
-}
-
-async function acquireLock(): Promise<boolean> {
-  try {
-    const handle = await open(lockPath(), "wx");
-    await handle.close();
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
-      await logError("Lock acquire error:", error);
-      return false;
-    }
-    try {
-      const info = await stat(lockPath());
-      if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
-        await unlink(lockPath()).catch(() => {});
-        const handle = await open(lockPath(), "wx");
-        await handle.close();
-        return true;
-      }
-    } catch {
-    }
-    return false;
-  }
-}
-
-async function releaseLock(): Promise<void> {
-  await unlink(lockPath()).catch(() => {});
-}
-
 async function readLeader(): Promise<LeaderRecord | null> {
   try {
     const parsed = JSON.parse(await readFile(leaderPath(), "utf-8"));
@@ -341,39 +273,6 @@ async function releaseLeader(pid: number, host: string): Promise<void> {
   }
 }
 
-async function sendTelegram(botToken: string, chatId: string, text: string): Promise<boolean> {
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      await logError(`Telegram send failed: ${response.status}`);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    await logError("Telegram send error:", error);
-    return false;
-  }
-}
-
-function buildResetMessage(state: QuotaState, window: WindowKey): string {
-  const label = PROVIDER_LABELS[state.provider];
-  const lines = [`${label} ${WINDOW_LABELS[window]} window reset`];
-  if (state.fiveHourRemaining !== null) {
-    const reset = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : "unknown";
-    lines.push(`5h: ${state.fiveHourRemaining}% left (${reset})`);
-  }
-  if (state.sevenDayRemaining !== null) {
-    const reset = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : "unknown";
-    lines.push(`7d: ${state.sevenDayRemaining}% left (${reset})`);
-  }
-  return lines.join("\n");
-}
-
 async function logError(message: string, error?: unknown): Promise<void> {
   const detail = error instanceof Error ? error.stack ?? error.message : error !== undefined ? String(error) : "";
   const line = `[${new Date().toISOString()}] ${message}${detail ? ` ${detail}` : ""}\n`;
@@ -390,13 +289,7 @@ export default function (pi: ExtensionAPI) {
   let ctxRef: ExtensionContext | null = null;
   let codexRedeemAttempted = false;
 
-  const lastSeenRemaining: Record<string, Record<WindowKey, number | null>> = {
-    anthropic: { fiveHour: null, sevenDay: null },
-    "openai-codex": { fiveHour: null, sevenDay: null },
-  };
-  let telegramEnabled = false;
   let cycleRunning = false;
-  const resetTimers: ReturnType<typeof setTimeout>[] = [];
   let isMain = false;
   let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   let stateWatcher: FSWatcher | null = null;
@@ -579,114 +472,22 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function attemptNotify(
-    state: QuotaState,
-    window: WindowKey,
-    newResetMs: number,
-    botToken: string,
-    chatId: string,
-  ): Promise<boolean> {
-    if (!(await acquireLock())) return false;
-    try {
-      const notified = await loadNotified();
-      const prev = notified[state.provider]?.[window];
-      if (prev !== undefined && prev >= newResetMs) return true;
-
-      const ok = await sendTelegram(botToken, chatId, buildResetMessage(state, window));
-      if (!ok) return false;
-
-      notified[state.provider] = { ...notified[state.provider], [window]: newResetMs };
-      try {
-        await saveNotified(notified);
-      } catch (error) {
-        // Message was already sent; failing to record it must not cause a resend
-        // storm on every cycle. Treat as handled and log.
-        await logError("Failed to record notified reset:", error);
-      }
-      return true;
-    } finally {
-      await releaseLock();
-    }
-  }
-
-  async function processResets() {
-    const config = await loadConfig();
-    telegramEnabled = !!(config?.telegramBotToken && config?.telegramChatId);
-    if (!telegramEnabled || !config) return;
-
-    const botToken = config.telegramBotToken!;
-    const chatId = config.telegramChatId!;
-
-    for (const state of states) {
-      const seen = lastSeenRemaining[state.provider];
-      if (!seen) continue;
-      for (const window of ["fiveHour", "sevenDay"] as const) {
-        const remaining = window === "fiveHour" ? state.fiveHourRemaining : state.sevenDayRemaining;
-        if (remaining === null) continue;
-        const prev = seen[window];
-        seen[window] = remaining;
-        if (prev === null) continue;
-        // A reset is a large upward jump in remaining quota. Gradual recovery of
-        // a rolling window (a few points per poll) stays below the threshold.
-        if (remaining - prev < RESET_JUMP_THRESHOLD) continue;
-        // reset_at is the dedup epoch: the notified record skips a (re)send when
-        // it already holds a timestamp >= the current window's reset time.
-        const resetDate = window === "fiveHour" ? state.fiveHourReset : state.sevenDayReset;
-        const epochMs = resetDate ? resetDate.getTime() : Date.now();
-        await attemptNotify(state, window, epochMs, botToken, chatId);
-      }
-    }
-  }
-
-  function clearResetTimers() {
-    for (const timer of resetTimers) clearTimeout(timer);
-    resetTimers.length = 0;
-  }
-
-  function scheduleResetTimers() {
-    clearResetTimers();
-    if (!telegramEnabled) return;
-
-    const now = Date.now();
-    const scheduled = new Set<number>();
-
-    for (const state of states) {
-      for (const window of ["fiveHour", "sevenDay"] as const) {
-        const resetDate = window === "fiveHour" ? state.fiveHourReset : state.sevenDayReset;
-        if (!resetDate) continue;
-        const fireAt = resetDate.getTime() + RESET_TIMER_BUFFER_MS;
-        if (fireAt <= now) continue;
-        if (scheduled.has(fireAt)) continue;
-        scheduled.add(fireAt);
-
-        const timer = setTimeout(() => {
-          void runCycle();
-        }, fireAt - now);
-        resetTimers.push(timer);
-      }
-    }
-  }
-
   async function runCycle() {
     // Only the main instance polls providers; standbys render from shared state.
     if (!isMain) return;
-    // Skip if a cycle is already in flight (e.g. a reset timer fires mid-poll).
-    // The in-flight cycle fetches fresh data and re-arms timers when it finishes,
-    // so detection is not missed; the 10-minute poll is the ultimate safety net.
+    // Skip if a cycle is already in flight; the 10-minute poll ensures
+    // data is always fresh.
     if (cycleRunning) return;
     cycleRunning = true;
     try {
       await pollQuotaStatus();
       // Re-check leadership between each privileged step: a heartbeat may have
-      // demoted us during network I/O, and only main may redeem/notify/persist.
+      // demoted us during network I/O, and only main may redeem/persist.
       if (!isMain) return;
       await tryAutoRedeemCodexReset();
       if (!isMain) return;
-      await processResets();
-      if (!isMain) return;
       await writeSharedState(states);
       updateWidget();
-      scheduleResetTimers();
     } catch (error) {
       // Never let a cycle throw: the poll loop re-arms itself after runCycle.
       await logError("Run cycle error:", error);
@@ -753,7 +554,6 @@ export default function (pi: ExtensionAPI) {
     if (isMain) {
       isMain = false;
       if (checkTimer) { clearTimeout(checkTimer); checkTimer = null; }
-      clearResetTimers();
     }
     startWatcher();
     updateWidget();
@@ -773,8 +573,8 @@ export default function (pi: ExtensionAPI) {
       // where a stale-takeover by another instance could be overwritten. That
       // instance will detect the lost ownership on its next heartbeat (<=20s) and
       // step down, so double-main is bounded — matching the design's accepted
-      // sleep/wake tolerance. Notification idempotency covers duplicate sends; the
-      // redeem risk is limited by the short window and leadership re-checks in runCycle.
+      // sleep/wake tolerance. The redeem risk is limited by the short window and
+      // leadership re-checks in runCycle.
       await writeLeader(record);
     } else {
       const won = await claimLeader(record);
@@ -926,11 +726,8 @@ export default function (pi: ExtensionAPI) {
       clearTimeout(checkTimer);
       checkTimer = null;
     }
-    clearResetTimers();
     states.length = 0;
     refreshNotified.clear();
-    lastSeenRemaining.anthropic = { fiveHour: null, sevenDay: null };
-    lastSeenRemaining["openai-codex"] = { fiveHour: null, sevenDay: null };
     ctxRef = ctx;
     codexRedeemAttempted = false;
     heartbeatGen++;
@@ -956,7 +753,6 @@ export default function (pi: ExtensionAPI) {
       heartbeatTimer = null;
     }
     heartbeatGen++;
-    clearResetTimers();
     stopWatcher();
     if (isMain) await releaseLeader(selfPid, selfHost);
     isMain = false; // ensure any in-flight check/cycle callback won't act as leader
