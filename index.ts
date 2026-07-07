@@ -219,14 +219,28 @@ export default function (pi: ExtensionAPI) {
     }, { placement: "aboveEditor" });
   }
 
-  function shouldPingOnFiveHourReset(previous: QuotaState, next: QuotaState): boolean {
-    if (!previous.fiveHourReset || !next.fiveHourReset) return false;
-    if (next.fiveHourReset.getTime() <= previous.fiveHourReset.getTime()) return false;
-    if (previous.fiveHourRemaining === null || next.fiveHourRemaining === null) return false;
-    return next.fiveHourRemaining > previous.fiveHourRemaining;
+  function windowResetDetected(previousReset: Date | null, nextReset: Date | null, previousRemaining: number | null, nextRemaining: number | null): boolean {
+    if (!previousReset || !nextReset) return false;
+    if (nextReset.getTime() <= previousReset.getTime()) return false;
+    if (previousRemaining === null || nextRemaining === null) return false;
+    return nextRemaining > previousRemaining;
   }
 
-  function pingProviderOnFiveHourReset(provider: QuotaState["provider"]) {
+  function shouldPingOnReset(previous: QuotaState, next: QuotaState): boolean {
+    return windowResetDetected(
+      previous.fiveHourReset,
+      next.fiveHourReset,
+      previous.fiveHourRemaining,
+      next.fiveHourRemaining,
+    ) || windowResetDetected(
+      previous.sevenDayReset,
+      next.sevenDayReset,
+      previous.sevenDayRemaining,
+      next.sevenDayRemaining,
+    );
+  }
+
+  function pingProviderOnReset(provider: QuotaState["provider"]) {
     const ctx = ctxRef;
     if (!ctx?.model) return;
     if (ctx.model.provider !== MODEL_PROVIDER_NAMES[provider]) return;
@@ -248,7 +262,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     child.on("error", (error: unknown) => {
-      void logError(`Five-hour reset ping failed for ${provider}:`, error);
+      void logError(`Reset ping failed for ${provider}:`, error);
     });
 
     child.unref();
@@ -261,7 +275,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const shouldPing = shouldPingOnFiveHourReset(existing, parsed);
+    const shouldPing = shouldPingOnReset(existing, parsed);
 
     existing.fiveHourRemaining = parsed.fiveHourRemaining;
     existing.fiveHourReset = parsed.fiveHourReset;
@@ -271,7 +285,7 @@ export default function (pi: ExtensionAPI) {
     existing.lastUpdated = parsed.lastUpdated;
 
     if (shouldPing) {
-      pingProviderOnFiveHourReset(parsed.provider);
+      pingProviderOnReset(parsed.provider);
     }
   }
 
