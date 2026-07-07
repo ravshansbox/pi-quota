@@ -6,6 +6,7 @@
  * it is verified manually by running it in pi. Do not add a test suite here.
  */
 
+import { spawn } from "node:child_process";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -86,6 +87,11 @@ type CodexResetConsumeResponse = {
 const PROVIDER_LABELS: Record<QuotaState["provider"], string> = {
   anthropic: "claude",
   "openai-codex": "codex",
+};
+
+const MODEL_PROVIDER_NAMES: Record<QuotaState["provider"], string> = {
+  anthropic: "anthropic",
+  "openai-codex": "openai",
 };
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -213,6 +219,41 @@ export default function (pi: ExtensionAPI) {
     }, { placement: "aboveEditor" });
   }
 
+  function shouldPingOnFiveHourReset(previous: QuotaState, next: QuotaState): boolean {
+    if (!previous.fiveHourReset || !next.fiveHourReset) return false;
+    if (next.fiveHourReset.getTime() <= previous.fiveHourReset.getTime()) return false;
+    if (previous.fiveHourRemaining === null || next.fiveHourRemaining === null) return false;
+    return next.fiveHourRemaining > previous.fiveHourRemaining;
+  }
+
+  function pingProviderOnFiveHourReset(provider: QuotaState["provider"]) {
+    const ctx = ctxRef;
+    if (!ctx?.model) return;
+    if (ctx.model.provider !== MODEL_PROVIDER_NAMES[provider]) return;
+
+    const child = spawn("pi", [
+      "--no-session",
+      "--no-extensions",
+      "--no-context-files",
+      "--no-tools",
+      "--provider",
+      ctx.model.provider,
+      "--model",
+      ctx.model.id,
+      "-p",
+      "hi",
+    ], {
+      cwd: ctx.cwd,
+      stdio: "ignore",
+    });
+
+    child.on("error", (error: unknown) => {
+      void logError(`Five-hour reset ping failed for ${provider}:`, error);
+    });
+
+    child.unref();
+  }
+
   function updateState(parsed: QuotaState) {
     const existing = states.find((s) => s.provider === parsed.provider);
     if (!existing) {
@@ -220,12 +261,18 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    const shouldPing = shouldPingOnFiveHourReset(existing, parsed);
+
     existing.fiveHourRemaining = parsed.fiveHourRemaining;
     existing.fiveHourReset = parsed.fiveHourReset;
     existing.sevenDayRemaining = parsed.sevenDayRemaining;
     existing.sevenDayReset = parsed.sevenDayReset;
     existing.resetsAvailable = parsed.resetsAvailable;
     existing.lastUpdated = parsed.lastUpdated;
+
+    if (shouldPing) {
+      pingProviderOnFiveHourReset(parsed.provider);
+    }
   }
 
   async function ensureAnthropicAccess(auth: AuthFile): Promise<OAuthAuthRecord | undefined> {
