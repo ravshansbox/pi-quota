@@ -164,7 +164,8 @@ async function logError(message: string, error?: unknown): Promise<void> {
   const line = `[${new Date().toISOString()}] ${message}${detail ? ` ${detail}` : ""}\n`;
   try {
     await appendFile(logPath(), line);
-  } catch {
+  } catch (error) {
+    console.error("pi-quota: could not write log:", error);
   }
 }
 
@@ -455,13 +456,17 @@ export default function (pi: ExtensionAPI) {
           if (data.rate_limit) {
             const primary = data.rate_limit.primary_window;
             const secondary = data.rate_limit.secondary_window;
+            // During OpenAI's temporary 5h-quota removal, the only returned
+            // window is the weekly quota, still named `primary_window`.
+            const fiveHour = secondary ? primary : undefined;
+            const sevenDay = secondary ?? primary;
             const resetsAvailable = data.rate_limit_reset_credits?.available_count;
             updateState({
               provider: "openai-codex",
-              fiveHourRemaining: primary ? clampPercent(100 - (primary.used_percent ?? 0)) : null,
-              fiveHourReset: primary?.reset_at ? new Date(primary.reset_at * 1000) : null,
-              sevenDayRemaining: secondary ? clampPercent(100 - (secondary.used_percent ?? 0)) : null,
-              sevenDayReset: secondary?.reset_at ? new Date(secondary.reset_at * 1000) : null,
+              fiveHourRemaining: fiveHour ? clampPercent(100 - (fiveHour.used_percent ?? 0)) : null,
+              fiveHourReset: fiveHour?.reset_at ? new Date(fiveHour.reset_at * 1000) : null,
+              sevenDayRemaining: sevenDay ? clampPercent(100 - (sevenDay.used_percent ?? 0)) : null,
+              sevenDayReset: sevenDay?.reset_at ? new Date(sevenDay.reset_at * 1000) : null,
               resetsAvailable: resetsAvailable !== undefined ? Math.max(0, Math.trunc(resetsAvailable)) : 0,
               lastUpdated: new Date(),
             });
