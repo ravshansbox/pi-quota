@@ -688,7 +688,7 @@ export default function (pi: ExtensionAPI) {
     }, delay);
   }
 
-  pi.on('session_start', async (_event, ctx) => {
+  pi.on('session_start', (_event, ctx) => {
     if (checkTimer) {
       clearTimeout(checkTimer);
       checkTimer = null;
@@ -698,7 +698,8 @@ export default function (pi: ExtensionAPI) {
     ctxRef = ctx;
     codexRedeemAttempted = false;
 
-    await runCycle();
+    // Do not await: quota polling is network-bound and would block startup.
+    void runCycle();
     scheduleCheck();
   });
 
