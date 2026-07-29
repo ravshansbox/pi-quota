@@ -33,7 +33,11 @@ interface QuotaState {
 
 type WidgetSegment = { text: string; role: 'muted' };
 
-type OAuthAuthRecord = { access?: string; refresh?: string; expires?: number };
+type OAuthAuthRecord = {
+  access?: string | undefined;
+  refresh?: string | undefined;
+  expires?: number | undefined;
+};
 
 type AuthFile = Record<string, OAuthAuthRecord>;
 
@@ -331,7 +335,7 @@ export default function (pi: ExtensionAPI) {
   async function ensureAnthropicAccess(
     auth: AuthFile,
   ): Promise<OAuthAuthRecord | undefined> {
-    const record = auth.anthropic;
+    const record = auth['anthropic'];
     if (!record?.refresh) return record;
     if (record.expires && record.expires > Date.now() + 60_000 && record.access)
       return record;
@@ -353,7 +357,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     const data = (await response.json()) as OAuthTokenResponse;
-    auth.anthropic = {
+    const refreshed: OAuthAuthRecord = {
       ...record,
       access: data.access_token ?? record.access,
       refresh: data.refresh_token ?? record.refresh,
@@ -361,9 +365,10 @@ export default function (pi: ExtensionAPI) {
         ? Date.now() + data.expires_in * 1000
         : record.expires,
     };
-    await persistAuthRecord('anthropic', auth.anthropic);
+    auth['anthropic'] = refreshed;
+    await persistAuthRecord('anthropic', refreshed);
     notifyRefreshOnce('anthropic', 'pi-quota: refreshed Anthropic auth');
-    return auth.anthropic;
+    return refreshed;
   }
 
   async function ensureOpenAIAccess(
@@ -391,7 +396,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     const data = (await response.json()) as OAuthTokenResponse;
-    auth['openai-codex'] = {
+    const refreshed: OAuthAuthRecord = {
       ...record,
       access: data.access_token ?? record.access,
       refresh: data.refresh_token ?? record.refresh,
@@ -399,9 +404,10 @@ export default function (pi: ExtensionAPI) {
         ? Date.now() + data.expires_in * 1000
         : record.expires,
     };
-    await persistAuthRecord('openai-codex', auth['openai-codex']);
+    auth['openai-codex'] = refreshed;
+    await persistAuthRecord('openai-codex', refreshed);
     notifyRefreshOnce('openai-codex', 'pi-quota: refreshed OpenAI Codex auth');
-    return auth['openai-codex'];
+    return refreshed;
   }
 
   async function listCodexResetCredits(

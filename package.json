@@ -1,5 +1,5 @@
 {
-  "name": "pi-quota",
+  "name": "@ravshansbox/pi-quota",
   "version": "0.1.0",
   "license": "MIT",
   "files": [
@@ -13,11 +13,33 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
+    "@types/node": "^26.1.2",
     "typescript": "^6.0.3"
   },
   "pi": {
     "extensions": [
       "./index.ts"
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ravshansbox/pi-quota.git"
+  },
+  "homepage": "https://github.com/ravshansbox/pi-quota#readme",
+  "bugs": {
+    "url": "https://github.com/ravshansbox/pi-quota/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "quota"
+  ],
+  "description": "Anthropic and OpenAI Codex quota widget extension for pi",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck"
   }
 }
