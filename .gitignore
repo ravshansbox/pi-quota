@@ -1,4 +1,3 @@
 node_modules/
-dist/
-*.js
-*.d.ts
+*.log
+.DS_Store
