@@ -77,11 +77,6 @@ type CodexResetCreditList = {
 
 type CodexResetConsumeResponse = { code?: string };
 
-const PROVIDER_LABELS: Record<QuotaState['provider'], string> = {
-  anthropic: 'claude',
-  'openai-codex': 'codex',
-};
-
 const MODEL_PROVIDER_NAMES: Record<QuotaState['provider'], string> = {
   anthropic: 'anthropic',
   'openai-codex': 'openai',
@@ -200,8 +195,16 @@ export default function (pi: ExtensionAPI) {
 
   function buildWidgetLines(): WidgetSegment[][] {
     const lines: WidgetSegment[][] = [];
-    const entries: { provider: QuotaState['provider']; text: string }[] = [];
-    for (const state of states) {
+
+    // The widget carries no provider label, so only ever render the provider
+    // backing the active model; anything else would be unattributable.
+    const activeProvider = ctxRef?.model?.provider;
+    if (!activeProvider) return lines;
+    const state = states.find(
+      (s) => MODEL_PROVIDER_NAMES[s.provider] === activeProvider,
+    );
+
+    if (state) {
       const parts: string[] = [];
       if (state.sevenDayRemaining !== null) {
         const resetStr = state.sevenDayReset
@@ -221,15 +224,9 @@ export default function (pi: ExtensionAPI) {
           : '';
         parts.push(`${state.resetsAvailable}x${expiryStr}`);
       }
-      entries.push({ provider: state.provider, text: parts.join(', ') });
-    }
-
-    // Only disambiguate with a provider label when more than one provider
-    // renders a line; a single provider needs no prefix.
-    const prefix = entries.length > 1;
-    for (const entry of entries) {
-      const label = prefix ? `${PROVIDER_LABELS[entry.provider]}: ` : '';
-      lines.push([{ role: 'muted', text: `${label}${entry.text}` }]);
+      if (parts.length > 0) {
+        lines.push([{ role: 'muted', text: parts.join(', ') }]);
+      }
     }
     return lines;
   }
@@ -707,6 +704,13 @@ export default function (pi: ExtensionAPI) {
     // Do not await: quota polling is network-bound and would block startup.
     void runCycle();
     scheduleCheck();
+  });
+
+  // The widget tracks the active model's provider, so re-render on switch
+  // rather than waiting for the next poll (up to 10 minutes away).
+  pi.on('model_select', (_event, ctx) => {
+    ctxRef = ctx;
+    updateWidget();
   });
 
   pi.on('session_shutdown', async () => {
