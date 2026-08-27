@@ -124,8 +124,8 @@ function formatResetTime(reset: Date): string {
   const hours = Math.floor((diff % 86400000) / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
 
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (days > 0) return `${days}d${hours}h`;
+  if (hours > 0) return `${hours}h${minutes}m`;
   if (minutes > 0) return `${minutes}m`;
   return 'now';
 }
@@ -200,30 +200,36 @@ export default function (pi: ExtensionAPI) {
 
   function buildWidgetLines(): WidgetSegment[][] {
     const lines: WidgetSegment[][] = [];
+    const entries: { provider: QuotaState['provider']; text: string }[] = [];
     for (const state of states) {
-      const label = PROVIDER_LABELS[state.provider];
       const parts: string[] = [];
       if (state.sevenDayRemaining !== null) {
         const resetStr = state.sevenDayReset
           ? formatResetTime(state.sevenDayReset)
-          : 'unknown';
-        parts.push(`7d: ${state.sevenDayRemaining}% left (${resetStr})`);
+          : '?';
+        parts.push(`7d ${state.sevenDayRemaining}% ${resetStr}`);
       }
       if (state.fiveHourRemaining !== null) {
         const resetStr = state.fiveHourReset
           ? formatResetTime(state.fiveHourReset)
-          : 'unknown';
-        parts.push(`5h: ${state.fiveHourRemaining}% left (${resetStr})`);
+          : '?';
+        parts.push(`5h ${state.fiveHourRemaining}% ${resetStr}`);
       }
       if (state.resetsAvailable > 0) {
         const expiryStr = state.resetSoonestExpiry
-          ? `, next expires in ${formatResetTime(state.resetSoonestExpiry)}`
+          ? ` ${formatResetTime(state.resetSoonestExpiry)}`
           : '';
-        parts.push(
-          `${state.resetsAvailable} reset${state.resetsAvailable === 1 ? '' : 's'}${expiryStr}`,
-        );
+        parts.push(`${state.resetsAvailable}x${expiryStr}`);
       }
-      lines.push([{ role: 'muted', text: `${label}: ${parts.join(', ')}` }]);
+      entries.push({ provider: state.provider, text: parts.join(', ') });
+    }
+
+    // Only disambiguate with a provider label when more than one provider
+    // renders a line; a single provider needs no prefix.
+    const prefix = entries.length > 1;
+    for (const entry of entries) {
+      const label = prefix ? `${PROVIDER_LABELS[entry.provider]}: ` : '';
+      lines.push([{ role: 'muted', text: `${label}${entry.text}` }]);
     }
     return lines;
   }
