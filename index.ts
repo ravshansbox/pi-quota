@@ -1,5 +1,5 @@
 /**
- * pi-quota — tracks Anthropic and OpenAI Codex subscription quota and renders a widget.
+ * pi-quota — tracks Anthropic and OpenAI Codex subscription quota and renders a footer status.
  *
  * NOTE: This extension deliberately has no automated tests. It is a single-file extension whose
  * behaviour is dominated by external HTTP APIs (Anthropic, OpenAI Codex) and pi runtime events;
@@ -14,7 +14,6 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { Text } from '@earendil-works/pi-tui';
 
 interface QuotaConfig {
   codexResets?: { autoRedeem?: boolean };
@@ -30,8 +29,6 @@ interface QuotaState {
   resetSoonestExpiry: Date | null;
   lastUpdated: Date;
 }
-
-type WidgetSegment = { text: string; role: 'muted' };
 
 type OAuthAuthRecord = {
   access?: string | undefined;
@@ -193,65 +190,47 @@ export default function (pi: ExtensionAPI) {
     ctxRef?.ui.notify(message, 'info');
   }
 
-  function buildWidgetLines(): WidgetSegment[][] {
-    const lines: WidgetSegment[][] = [];
-
-    // The widget carries no provider label, so only ever render the provider
+  function buildStatusText(): string | undefined {
+    // The status carries no provider label, so only ever render the provider
     // backing the active model; anything else would be unattributable.
     const activeProvider = ctxRef?.model?.provider;
-    if (!activeProvider) return lines;
+    if (!activeProvider) return undefined;
     const state = states.find(
       (s) => MODEL_PROVIDER_NAMES[s.provider] === activeProvider,
     );
 
-    if (state) {
-      const parts: string[] = [];
-      if (state.sevenDayRemaining !== null) {
-        const resetStr = state.sevenDayReset
-          ? formatResetTime(state.sevenDayReset)
-          : '?';
-        parts.push(`7d ${state.sevenDayRemaining}% ${resetStr}`);
-      }
-      if (state.fiveHourRemaining !== null) {
-        const resetStr = state.fiveHourReset
-          ? formatResetTime(state.fiveHourReset)
-          : '?';
-        parts.push(`5h ${state.fiveHourRemaining}% ${resetStr}`);
-      }
-      if (state.resetsAvailable > 0) {
-        const expiryStr = state.resetSoonestExpiry
-          ? ` ${formatResetTime(state.resetSoonestExpiry)}`
-          : '';
-        parts.push(`${state.resetsAvailable}x${expiryStr}`);
-      }
-      if (parts.length > 0) {
-        lines.push([{ role: 'muted', text: parts.join(', ') }]);
-      }
+    if (!state) return undefined;
+
+    const parts: string[] = [];
+    if (state.sevenDayRemaining !== null) {
+      const resetStr = state.sevenDayReset
+        ? formatResetTime(state.sevenDayReset)
+        : '?';
+      parts.push(`7d ${state.sevenDayRemaining}% ${resetStr}`);
     }
-    return lines;
+    if (state.fiveHourRemaining !== null) {
+      const resetStr = state.fiveHourReset
+        ? formatResetTime(state.fiveHourReset)
+        : '?';
+      parts.push(`5h ${state.fiveHourRemaining}% ${resetStr}`);
+    }
+    if (state.resetsAvailable > 0) {
+      const expiryStr = state.resetSoonestExpiry
+        ? ` ${formatResetTime(state.resetSoonestExpiry)}`
+        : '';
+      parts.push(`${state.resetsAvailable}x${expiryStr}`);
+    }
+    return parts.length > 0 ? parts.join(', ') : undefined;
   }
 
-  function updateWidget() {
+  function updateStatus() {
     if (!ctxRef) return;
 
-    const lines = buildWidgetLines();
+    const text = buildStatusText();
 
-    if (lines.length === 0) {
-      ctxRef.ui.setWidget('pi-quota', undefined);
-      return;
-    }
-
-    ctxRef.ui.setWidget(
+    ctxRef.ui.setStatus(
       'pi-quota',
-      (_tui, theme) => {
-        const body = lines
-          .map((line) =>
-            line.map((seg) => theme.fg(seg.role, seg.text)).join(''),
-          )
-          .join('\n');
-        return new Text(body, 0, 0);
-      },
-      { placement: 'belowEditor' },
+      text === undefined ? undefined : ctxRef.ui.theme.fg('muted', text),
     );
   }
 
@@ -658,7 +637,7 @@ export default function (pi: ExtensionAPI) {
     if (result.code === 'reset') {
       ctxRef?.ui.notify('pi-quota: saved reset redeemed successfully', 'info');
       await pollQuotaStatus();
-      updateWidget();
+      updateStatus();
     } else {
       logError(`Reset redeem returned code: ${result.code}`);
       ctxRef?.ui.notify(
@@ -674,7 +653,7 @@ export default function (pi: ExtensionAPI) {
     try {
       await pollQuotaStatus();
       await tryAutoRedeemCodexReset();
-      updateWidget();
+      updateStatus();
     } catch (error) {
       await logError('Run cycle error:', error);
     } finally {
@@ -706,11 +685,11 @@ export default function (pi: ExtensionAPI) {
     scheduleCheck();
   });
 
-  // The widget tracks the active model's provider, so re-render on switch
+  // The status tracks the active model's provider, so re-render on switch
   // rather than waiting for the next poll (up to 10 minutes away).
   pi.on('model_select', (_event, ctx) => {
     ctxRef = ctx;
-    updateWidget();
+    updateStatus();
   });
 
   pi.on('session_shutdown', async () => {
