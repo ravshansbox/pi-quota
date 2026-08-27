@@ -251,7 +251,7 @@ export default function (pi: ExtensionAPI) {
           .join('\n');
         return new Text(body, 0, 0);
       },
-      { placement: 'aboveEditor' },
+      { placement: 'belowEditor' },
     );
   }
 
