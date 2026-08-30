@@ -207,17 +207,17 @@ export default function (pi: ExtensionAPI) {
     if (!state) return undefined;
 
     const parts: string[] = [];
-    if (state.sevenDayRemaining !== null) {
-      const resetStr = state.sevenDayReset
-        ? formatResetTime(state.sevenDayReset)
-        : '?';
-      parts.push(`7d ${state.sevenDayRemaining}% ${resetStr}`);
-    }
     if (state.fiveHourRemaining !== null) {
       const resetStr = state.fiveHourReset
         ? formatResetTime(state.fiveHourReset)
         : '?';
-      parts.push(`5h ${state.fiveHourRemaining}% ${resetStr}`);
+      parts.push(`${state.fiveHourRemaining}% ${resetStr}`);
+    }
+    if (state.sevenDayRemaining !== null) {
+      const resetStr = state.sevenDayReset
+        ? formatResetTime(state.sevenDayReset)
+        : '?';
+      parts.push(`${state.sevenDayRemaining}% ${resetStr}`);
     }
     if (state.resetsAvailable > 0) {
       const expiryStr = state.resetSoonestExpiry
@@ -226,7 +226,7 @@ export default function (pi: ExtensionAPI) {
       parts.push(`${state.resetsAvailable}x${expiryStr}`);
     }
     return parts.length > 0
-      ? `${QUOTA_LABELS[state.provider]}: ${parts.join(', ')}`
+      ? `${QUOTA_LABELS[state.provider]}: ${parts.join(' | ')}`
       : undefined;
   }
 
