@@ -1,24 +1,16 @@
 # pi-quota
 
-Pi extension that tracks Anthropic and OpenAI Codex quota usage and shows quota in the footer status line for either provider.
+Anthropic and OpenAI Codex quota status extension for pi.
 
-## Installation
+## Install
 
-Add to `~/.pi/agent/settings.json`:
-
-```json
-{
-  "packages": ["git:github.com/ravshansbox/pi-quota"]
-}
+```bash
+pi install git:github.com/ravshansbox/pi-quota
 ```
 
-Run `pi update` to install.
+## Usage
 
-## Configuration
-
-The status is shown whenever a `QuotaState` exists for the provider; no other configuration is required. OAuth credentials for Anthropic and OpenAI Codex are read from `~/.pi/agent/auth.json`.
-
-## Behaviour
+Pi loads the extension from `./index.ts` and shows the remaining quota for the provider backing the active model in the footer status line.
 
 - Polls Anthropic and OpenAI Codex usage endpoints at every 10-minute wall-clock mark (`HH:00`, `HH:10`, `HH:20`, `HH:30`, `HH:40`, `HH:50`); polls immediately on session start, then aligns to the next mark
 - Shows a footer status for the provider backing the **active model**, and only when quota data for that provider has been polled; switching models re-renders it immediately
@@ -29,6 +21,13 @@ The status is shown whenever a `QuotaState` exists for the provider; no other co
 - Refreshes Anthropic and OpenAI Codex OAuth access tokens from `~/.pi/agent/auth.json` when needed, writes updated credentials back (re-reading the file first to avoid clobbering concurrent updates), and notifies on the first successful refresh per provider each session
 - Appends poll and token-refresh errors to `~/.pi/agent/pi-quota.log`
 
-## Notes
+## Configuration
 
-- Polling keeps the displayed quota fresh.
+No configuration is required. OAuth credentials for Anthropic and OpenAI Codex are read from `~/.pi/agent/auth.json`.
+
+## Development
+
+```bash
+npm install
+npm run check
+```
