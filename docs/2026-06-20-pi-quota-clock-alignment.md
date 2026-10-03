@@ -12,11 +12,11 @@
 
 ## File Structure
 
-| File | Change | Responsibility |
-|------|--------|----------------|
-| `index.ts` | Modify | Add `nextMarkAfter`; drop `pollIntervalMs`, `MIN_POLL_INTERVAL_MS`, `DEFAULT_POLL_INTERVAL_MS`; rewire `session_start`'s `scheduleCheck` to align to marks. |
+| File                       | Change | Responsibility                                                                                                                                                           |
+| -------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `index.ts`                 | Modify | Add `nextMarkAfter`; drop `pollIntervalMs`, `MIN_POLL_INTERVAL_MS`, `DEFAULT_POLL_INTERVAL_MS`; rewire `session_start`'s `scheduleCheck` to align to marks.              |
 | `clock-alignment.test.mjs` | Create | Source-grep tests asserting the new helper, the absence of the old config plumbing, and the new `scheduleCheck` shape. Mirrors the style of `no-blocking-apis.test.mjs`. |
-| `README.md` | Modify | Drop the `pollIntervalMs` row from the configuration table, drop it from the install-snippet example, update the "Behaviour" bullet. |
+| `README.md`                | Modify | Drop the `pollIntervalMs` row from the configuration table, drop it from the install-snippet example, update the "Behaviour" bullet.                                     |
 
 The single-file extension layout from the existing design (`docs/2026-06-13-pi-quota-design.md`) is preserved.
 
@@ -25,6 +25,7 @@ The single-file extension layout from the existing design (`docs/2026-06-13-pi-q
 ## Task 1: Add failing tests for clock-aligned scheduling
 
 **Files:**
+
 - Create: `clock-alignment.test.mjs`
 
 - [ ] **Step 1: Create the new test file**
@@ -48,10 +49,7 @@ const sessionStartSource =
     : source.slice(sessionStartIdx);
 
 test('nextMarkAfter helper is defined and has the expected signature', () => {
-  assert.match(
-    source,
-    /function\s+nextMarkAfter\s*\(\s*time\s*:\s*Date\s*\)\s*:\s*Date/,
-  );
+  assert.match(source, /function\s+nextMarkAfter\s*\(\s*time\s*:\s*Date\s*\)\s*:\s*Date/);
 });
 
 test('pollIntervalMs has been removed from QuotaConfig and the session handler', () => {
@@ -92,6 +90,7 @@ git -c user.name=ravshansbox -c user.email=ravshansbox@gmail.com commit -m "test
 ## Task 2: Implement clock-aligned scheduling in `index.ts`
 
 **Files:**
+
 - Modify: `index.ts` (drop `pollIntervalMs` config field, drop the two interval constants, add `nextMarkAfter`, rewire `scheduleCheck`)
 
 - [ ] **Step 1: Drop `pollIntervalMs` from `QuotaConfig`**
@@ -137,39 +136,39 @@ function nextMarkAfter(time: Date): Date {
 In the `pi.on("session_start", ...)` handler, locate the existing `loadConfig` / `intervalMs` / `MIN_POLL_INTERVAL_MS` validation block:
 
 ```typescript
-    const config = await loadConfig();
-    let intervalMs = config?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-    if (typeof intervalMs !== "number" || intervalMs < MIN_POLL_INTERVAL_MS) {
-      ctx.ui.notify(
-        `pi-quota: pollIntervalMs must be a number >= ${MIN_POLL_INTERVAL_MS}; using default ${DEFAULT_POLL_INTERVAL_MS}`,
-        "warning",
-      );
-      intervalMs = DEFAULT_POLL_INTERVAL_MS;
-    }
+const config = await loadConfig();
+let intervalMs = config?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+if (typeof intervalMs !== 'number' || intervalMs < MIN_POLL_INTERVAL_MS) {
+  ctx.ui.notify(
+    `pi-quota: pollIntervalMs must be a number >= ${MIN_POLL_INTERVAL_MS}; using default ${DEFAULT_POLL_INTERVAL_MS}`,
+    'warning',
+  );
+  intervalMs = DEFAULT_POLL_INTERVAL_MS;
+}
 
-    const scheduleCheck = () => {
-      checkTimer = setTimeout(async () => {
-        await pollQuotaStatus();
-        await tryAutoRedeemCodexReset();
-        updateWidget();
-        scheduleCheck();
-      }, intervalMs);
-    };
+const scheduleCheck = () => {
+  checkTimer = setTimeout(async () => {
+    await pollQuotaStatus();
+    await tryAutoRedeemCodexReset();
+    updateWidget();
+    scheduleCheck();
+  }, intervalMs);
+};
 ```
 
 Replace the entire block with the version below (the `config`/`loadConfig` call is no longer needed here; if no other config fields are referenced after this change, the call can be dropped entirely — see step 5):
 
 ```typescript
-    const scheduleCheck = () => {
-      const next = nextMarkAfter(new Date());
-      const delay = Math.max(0, next.getTime() - Date.now());
-      checkTimer = setTimeout(async () => {
-        await pollQuotaStatus();
-        await tryAutoRedeemCodexReset();
-        updateWidget();
-        scheduleCheck();
-      }, delay);
-    };
+const scheduleCheck = () => {
+  const next = nextMarkAfter(new Date());
+  const delay = Math.max(0, next.getTime() - Date.now());
+  checkTimer = setTimeout(async () => {
+    await pollQuotaStatus();
+    await tryAutoRedeemCodexReset();
+    updateWidget();
+    scheduleCheck();
+  }, delay);
+};
 ```
 
 Leave the `void refresh();` and `scheduleCheck();` calls at the bottom of the handler untouched.
@@ -205,6 +204,7 @@ git -c user.name=ravshansbox -c user.email=ravshansbox@gmail.com commit -m "refa
 ## Task 3: Update README to drop `pollIntervalMs` and document the new behaviour
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Drop `pollIntervalMs` from the install-snippet example**
@@ -213,9 +213,7 @@ In `README.md`, replace the install-snippet:
 
 ```json
 {
-  "packages": [
-    "git:github.com/ravshansbox/pi-quota"
-  ],
+  "packages": ["git:github.com/ravshansbox/pi-quota"],
   "quota": {
     "pollIntervalMs": 600000
   }
@@ -226,9 +224,7 @@ with:
 
 ```json
 {
-  "packages": [
-    "git:github.com/ravshansbox/pi-quota"
-  ]
+  "packages": ["git:github.com/ravshansbox/pi-quota"]
 }
 ```
 
@@ -237,17 +233,17 @@ with:
 In `README.md`, replace the configuration table:
 
 ```markdown
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `pollIntervalMs` | No | 600000 | Quota polling interval in milliseconds, minimum 60000. Invalid values fall back to the default with a warning |
+| Field            | Required | Default | Description                                                                                                   |
+| ---------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `pollIntervalMs` | No       | 600000  | Quota polling interval in milliseconds, minimum 60000. Invalid values fall back to the default with a warning |
 ```
 
 with the table header followed by an empty body (the extension no longer has user-facing configuration):
 
 ```markdown
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| _None_ | — | — | The extension has no user-facing configuration. The 10-minute polling cadence is fixed. |
+| Field  | Required | Default | Description                                                                             |
+| ------ | -------- | ------- | --------------------------------------------------------------------------------------- |
+| _None_ | —        | —       | The extension has no user-facing configuration. The 10-minute polling cadence is fixed. |
 ```
 
 - [ ] **Step 3: Update the "Behaviour" bullet**

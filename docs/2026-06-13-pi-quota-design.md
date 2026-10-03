@@ -31,9 +31,9 @@ All settings under the `quota` key in `~/.pi/agent/settings.json`:
 }
 ```
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `pollIntervalMs` | No | 600000 | Quota polling interval in ms, minimum 60000. Invalid values fall back to the default with a warning |
+| Field            | Required | Default | Description                                                                                         |
+| ---------------- | -------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `pollIntervalMs` | No       | 600000  | Quota polling interval in ms, minimum 60000. Invalid values fall back to the default with a warning |
 
 OAuth credentials for Anthropic and OpenAI Codex are read from
 `~/.pi/agent/auth.json`. Neither provider is required: a missing credential just
@@ -78,7 +78,7 @@ existing record. All HTTP requests use a 30s timeout.
 
 ```typescript
 interface QuotaState {
-  provider: "anthropic" | "openai-codex";
+  provider: 'anthropic' | 'openai-codex';
   fiveHourRemaining: number | null;
   fiveHourReset: Date | null;
   sevenDayRemaining: number | null;

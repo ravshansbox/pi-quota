@@ -10,10 +10,7 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 interface QuotaConfig {
   codexResets?: { autoRedeem?: boolean };
@@ -107,9 +104,7 @@ function parseCreditExpiry(value: string | number | undefined): Date | null {
     return Number.isNaN(date.getTime()) ? null : date;
   }
   const text = value.trim();
-  const date = /^\d+$/.test(text)
-    ? new Date(Number(text) * 1000)
-    : new Date(text);
+  const date = /^\d+$/.test(text) ? new Date(Number(text) * 1000) : new Date(text);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -153,10 +148,7 @@ async function saveAuth(auth: AuthFile): Promise<void> {
   await writeFile(authPath(), JSON.stringify(auth, null, 2));
 }
 
-async function persistAuthRecord(
-  provider: string,
-  record: OAuthAuthRecord,
-): Promise<void> {
+async function persistAuthRecord(provider: string, record: OAuthAuthRecord): Promise<void> {
   const current = (await loadAuth()) ?? {};
   current[provider] = record;
   await saveAuth(current);
@@ -200,23 +192,17 @@ export default function (pi: ExtensionAPI) {
     // would not apply to the next request.
     const activeProvider = ctxRef?.model?.provider;
     if (!activeProvider) return undefined;
-    const state = states.find(
-      (s) => MODEL_PROVIDER_NAMES[s.provider] === activeProvider,
-    );
+    const state = states.find((s) => MODEL_PROVIDER_NAMES[s.provider] === activeProvider);
 
     if (!state) return undefined;
 
     const parts: string[] = [];
     if (state.fiveHourRemaining !== null) {
-      const resetStr = state.fiveHourReset
-        ? formatResetTime(state.fiveHourReset)
-        : '?';
+      const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : '?';
       parts.push(`${state.fiveHourRemaining}% ${resetStr}`);
     }
     if (state.sevenDayRemaining !== null) {
-      const resetStr = state.sevenDayReset
-        ? formatResetTime(state.sevenDayReset)
-        : '?';
+      const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : '?';
       parts.push(`${state.sevenDayRemaining}% ${resetStr}`);
     }
     if (state.resetsAvailable > 0) {
@@ -225,9 +211,7 @@ export default function (pi: ExtensionAPI) {
         : '';
       parts.push(`${state.resetsAvailable}x${expiryStr}`);
     }
-    return parts.length > 0
-      ? `${QUOTA_LABELS[state.provider]}: ${parts.join(' | ')}`
-      : undefined;
+    return parts.length > 0 ? `${QUOTA_LABELS[state.provider]}: ${parts.join(' | ')}` : undefined;
   }
 
   function updateStatus() {
@@ -321,13 +305,10 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function ensureAnthropicAccess(
-    auth: AuthFile,
-  ): Promise<OAuthAuthRecord | undefined> {
+  async function ensureAnthropicAccess(auth: AuthFile): Promise<OAuthAuthRecord | undefined> {
     const record = auth['anthropic'];
     if (!record?.refresh) return record;
-    if (record.expires && record.expires > Date.now() + 60_000 && record.access)
-      return record;
+    if (record.expires && record.expires > Date.now() + 60_000 && record.access) return record;
 
     const response = await fetch('https://api.anthropic.com/v1/oauth/token', {
       method: 'POST',
@@ -350,9 +331,7 @@ export default function (pi: ExtensionAPI) {
       ...record,
       access: data.access_token ?? record.access,
       refresh: data.refresh_token ?? record.refresh,
-      expires: data.expires_in
-        ? Date.now() + data.expires_in * 1000
-        : record.expires,
+      expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
     };
     auth['anthropic'] = refreshed;
     await persistAuthRecord('anthropic', refreshed);
@@ -360,13 +339,10 @@ export default function (pi: ExtensionAPI) {
     return refreshed;
   }
 
-  async function ensureOpenAIAccess(
-    auth: AuthFile,
-  ): Promise<OAuthAuthRecord | undefined> {
+  async function ensureOpenAIAccess(auth: AuthFile): Promise<OAuthAuthRecord | undefined> {
     const record = auth['openai-codex'];
     if (!record?.refresh) return record;
-    if (record.expires && record.expires > Date.now() + 60_000 && record.access)
-      return record;
+    if (record.expires && record.expires > Date.now() + 60_000 && record.access) return record;
 
     const response = await fetch('https://auth.openai.com/oauth/token', {
       method: 'POST',
@@ -389,9 +365,7 @@ export default function (pi: ExtensionAPI) {
       ...record,
       access: data.access_token ?? record.access,
       refresh: data.refresh_token ?? record.refresh,
-      expires: data.expires_in
-        ? Date.now() + data.expires_in * 1000
-        : record.expires,
+      expires: data.expires_in ? Date.now() + data.expires_in * 1000 : record.expires,
     };
     auth['openai-codex'] = refreshed;
     await persistAuthRecord('openai-codex', refreshed);
@@ -399,9 +373,7 @@ export default function (pi: ExtensionAPI) {
     return refreshed;
   }
 
-  async function listCodexResetCredits(
-    accessToken: string,
-  ): Promise<CodexResetCreditList | null> {
+  async function listCodexResetCredits(accessToken: string): Promise<CodexResetCreditList | null> {
     try {
       const response = await fetch(
         'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
@@ -427,9 +399,7 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function fetchCodexSoonestResetExpiry(
-    accessToken: string,
-  ): Promise<Date | null> {
+  async function fetchCodexSoonestResetExpiry(accessToken: string): Promise<Date | null> {
     const creditList = await listCodexResetCredits(accessToken);
     if (!creditList) return null;
     const now = Date.now();
@@ -486,17 +456,14 @@ export default function (pi: ExtensionAPI) {
 
       const anthropicAuth = await ensureAnthropicAccess(auth);
       if (anthropicAuth?.access) {
-        const response = await fetch(
-          'https://api.anthropic.com/api/oauth/usage',
-          {
-            headers: {
-              Authorization: `Bearer ${anthropicAuth.access}`,
-              'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
-              accept: 'application/json',
-            },
-            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
+          headers: {
+            Authorization: `Bearer ${anthropicAuth.access}`,
+            'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+            accept: 'application/json',
           },
-        );
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
 
         if (response.ok) {
           const data = (await response.json()) as AnthropicUsageResponse;
@@ -504,18 +471,10 @@ export default function (pi: ExtensionAPI) {
           const sevenDay = data.seven_day;
           updateState({
             provider: 'anthropic',
-            fiveHourRemaining: fiveHour
-              ? clampPercent(100 - (fiveHour.utilization ?? 0))
-              : null,
-            fiveHourReset: fiveHour?.resets_at
-              ? new Date(fiveHour.resets_at)
-              : null,
-            sevenDayRemaining: sevenDay
-              ? clampPercent(100 - (sevenDay.utilization ?? 0))
-              : null,
-            sevenDayReset: sevenDay?.resets_at
-              ? new Date(sevenDay.resets_at)
-              : null,
+            fiveHourRemaining: fiveHour ? clampPercent(100 - (fiveHour.utilization ?? 0)) : null,
+            fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
+            sevenDayRemaining: sevenDay ? clampPercent(100 - (sevenDay.utilization ?? 0)) : null,
+            sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
             resetsAvailable: 0,
             resetSoonestExpiry: null,
             lastUpdated: new Date(),
@@ -527,17 +486,14 @@ export default function (pi: ExtensionAPI) {
 
       const openaiAuth = await ensureOpenAIAccess(auth);
       if (openaiAuth?.access) {
-        const response = await fetch(
-          'https://chatgpt.com/backend-api/wham/usage',
-          {
-            headers: {
-              Authorization: `Bearer ${openaiAuth.access}`,
-              'User-Agent': 'pi-quota/1.0',
-              accept: 'application/json',
-            },
-            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
+          headers: {
+            Authorization: `Bearer ${openaiAuth.access}`,
+            'User-Agent': 'pi-quota/1.0',
+            accept: 'application/json',
           },
-        );
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
 
         if (response.ok) {
           const data = (await response.json()) as OpenAIUsageResponse;
@@ -548,31 +504,18 @@ export default function (pi: ExtensionAPI) {
             // window is the weekly quota, still named `primary_window`.
             const fiveHour = secondary ? primary : undefined;
             const sevenDay = secondary ?? primary;
-            const resetsAvailable =
-              data.rate_limit_reset_credits?.available_count;
+            const resetsAvailable = data.rate_limit_reset_credits?.available_count;
             const resetCount =
-              resetsAvailable !== undefined
-                ? Math.max(0, Math.trunc(resetsAvailable))
-                : 0;
+              resetsAvailable !== undefined ? Math.max(0, Math.trunc(resetsAvailable)) : 0;
             updateState({
               provider: 'openai-codex',
-              fiveHourRemaining: fiveHour
-                ? clampPercent(100 - (fiveHour.used_percent ?? 0))
-                : null,
-              fiveHourReset: fiveHour?.reset_at
-                ? new Date(fiveHour.reset_at * 1000)
-                : null,
-              sevenDayRemaining: sevenDay
-                ? clampPercent(100 - (sevenDay.used_percent ?? 0))
-                : null,
-              sevenDayReset: sevenDay?.reset_at
-                ? new Date(sevenDay.reset_at * 1000)
-                : null,
+              fiveHourRemaining: fiveHour ? clampPercent(100 - (fiveHour.used_percent ?? 0)) : null,
+              fiveHourReset: fiveHour?.reset_at ? new Date(fiveHour.reset_at * 1000) : null,
+              sevenDayRemaining: sevenDay ? clampPercent(100 - (sevenDay.used_percent ?? 0)) : null,
+              sevenDayReset: sevenDay?.reset_at ? new Date(sevenDay.reset_at * 1000) : null,
               resetsAvailable: resetCount,
               resetSoonestExpiry:
-                resetCount > 0
-                  ? await fetchCodexSoonestResetExpiry(openaiAuth.access)
-                  : null,
+                resetCount > 0 ? await fetchCodexSoonestResetExpiry(openaiAuth.access) : null,
               lastUpdated: new Date(),
             });
           }
@@ -593,10 +536,7 @@ export default function (pi: ExtensionAPI) {
     if (!codexState) return;
 
     // Reset the flag when the weekly window recovers
-    if (
-      codexState.sevenDayRemaining !== null &&
-      codexState.sevenDayRemaining > 0
-    ) {
+    if (codexState.sevenDayRemaining !== null && codexState.sevenDayRemaining > 0) {
       codexRedeemAttempted = false;
     }
 
@@ -613,10 +553,7 @@ export default function (pi: ExtensionAPI) {
     const openaiAuth = await ensureOpenAIAccess(auth);
     if (!openaiAuth?.access) return;
 
-    ctxRef?.ui.notify(
-      'pi-quota: weekly limit exhausted, redeeming saved reset...',
-      'info',
-    );
+    ctxRef?.ui.notify('pi-quota: weekly limit exhausted, redeeming saved reset...', 'info');
 
     const creditList = await listCodexResetCredits(openaiAuth.access);
     if (!creditList || creditList.credits.length === 0) {
@@ -624,18 +561,13 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const availableCredit = creditList.credits.find(
-      (c) => c.status === 'available' || !c.status,
-    );
+    const availableCredit = creditList.credits.find((c) => c.status === 'available' || !c.status);
     if (!availableCredit) {
       logError('No available reset credit found');
       return;
     }
 
-    const result = await consumeCodexResetCredit(
-      openaiAuth.access,
-      availableCredit.id,
-    );
+    const result = await consumeCodexResetCredit(openaiAuth.access, availableCredit.id);
     if (!result) {
       ctxRef?.ui.notify('pi-quota: failed to redeem reset', 'warning');
       return;
@@ -647,10 +579,7 @@ export default function (pi: ExtensionAPI) {
       updateStatus();
     } else {
       logError(`Reset redeem returned code: ${result.code}`);
-      ctxRef?.ui.notify(
-        `pi-quota: reset redeem failed (${result.code})`,
-        'warning',
-      );
+      ctxRef?.ui.notify(`pi-quota: reset redeem failed (${result.code})`, 'warning');
     }
   }
 

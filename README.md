@@ -8,9 +8,7 @@ Add to `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "packages": [
-    "git:github.com/ravshansbox/pi-quota"
-  ]
+  "packages": ["git:github.com/ravshansbox/pi-quota"]
 }
 ```
 
