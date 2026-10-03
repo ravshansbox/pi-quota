@@ -1,7 +1,7 @@
 {
   "name": "@ravshansbox/pi-quota",
   "version": "0.2.0",
-  "description": "Anthropic and OpenAI Codex quota widget extension for pi",
+  "description": "Anthropic and OpenAI Codex quota status extension for pi",
   "license": "MIT",
   "type": "module",
   "repository": {
