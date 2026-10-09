@@ -5,7 +5,7 @@ Anthropic and OpenAI Codex quota status extension for pi.
 ## Install
 
 ```bash
-pi install git:github.com/ravshansbox/pi-quota
+pi install npm:@ravshansbox/pi-quota
 ```
 
 ## Usage
