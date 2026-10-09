@@ -76,11 +76,6 @@ const MODEL_PROVIDER_NAMES: Record<QuotaState['provider'], string> = {
   'openai-codex': 'openai',
 };
 
-const QUOTA_LABELS: Record<QuotaState['provider'], string> = {
-  anthropic: 'Claude',
-  'openai-codex': 'Codex',
-};
-
 const REQUEST_TIMEOUT_MS = 30_000;
 
 function nextMarkAfter(time: Date): Date {
@@ -211,7 +206,7 @@ export default function (pi: ExtensionAPI) {
         : '';
       parts.push(`${state.resetsAvailable}x${expiryStr}`);
     }
-    return parts.length > 0 ? `${QUOTA_LABELS[state.provider]}: ${parts.join(' | ')}` : undefined;
+    return parts.length > 0 ? parts.join(' | ') : undefined;
   }
 
   function updateStatus() {
