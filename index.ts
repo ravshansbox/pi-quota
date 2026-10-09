@@ -206,7 +206,7 @@ export default function (pi: ExtensionAPI) {
         : '';
       parts.push(`${state.resetsAvailable}x${expiryStr}`);
     }
-    return parts.length > 0 ? parts.join(' | ') : undefined;
+    return parts.length > 0 ? parts.join(' · ') : undefined;
   }
 
   function updateStatus() {
