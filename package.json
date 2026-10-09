@@ -31,7 +31,7 @@
     "check": "npm run typecheck && npm run lint && npm run format:check"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.1.0"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
