@@ -25,6 +25,16 @@ Pi loads the extension from `./index.ts` and shows the remaining quota for the p
 
 No configuration is required. OAuth credentials for Anthropic and OpenAI Codex are read from `~/.pi/agent/auth.json`.
 
+To redeem a saved OpenAI Codex reset automatically when the 7-day window is exhausted, add this to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "quota": {
+    "codexResets": { "autoRedeem": true }
+  }
+}
+```
+
 ## Development
 
 ```bash
