@@ -8,6 +8,8 @@ Anthropic and OpenAI Codex quota status extension for pi.
 pi install npm:@ravshansbox/pi-quota
 ```
 
+Add `-l` to install it in project settings.
+
 ## Usage
 
 Pi loads the extension from `./index.ts` and shows the remaining quota for the provider backing the active model in the footer status line.
