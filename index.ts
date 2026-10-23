@@ -1,11 +1,3 @@
-/**
- * pi-quota — tracks Anthropic and OpenAI Codex subscription quota and renders a footer status.
- *
- * NOTE: This extension deliberately has no automated tests. It is a single-file extension whose
- * behaviour is dominated by external HTTP APIs (Anthropic, OpenAI Codex) and pi runtime events;
- * it is verified manually by running it in pi. Do not add a test suite here.
- */
-
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -186,8 +178,6 @@ export default function (pi: ExtensionAPI) {
   }
 
   function buildStatusText(): string | undefined {
-    // Only ever render the provider backing the active model; anything else
-    // would not apply to the next request.
     const activeProvider = ctxRef?.model?.provider;
     if (!activeProvider) return undefined;
     const state = states.find((s) => MODEL_PROVIDER_NAMES[s.provider] === activeProvider);
@@ -498,8 +488,6 @@ export default function (pi: ExtensionAPI) {
           if (data.rate_limit) {
             const primary = data.rate_limit.primary_window;
             const secondary = data.rate_limit.secondary_window;
-            // During OpenAI's temporary 5h-quota removal, the only returned
-            // window is the weekly quota, still named `primary_window`.
             const fiveHour = secondary ? primary : undefined;
             const sevenDay = secondary ?? primary;
             const resetsAvailable = data.rate_limit_reset_credits?.available_count;
@@ -533,12 +521,10 @@ export default function (pi: ExtensionAPI) {
     const codexState = states.find((s) => s.provider === 'openai-codex');
     if (!codexState) return;
 
-    // Reset the flag when the weekly window recovers
     if (codexState.sevenDayRemaining !== null && codexState.sevenDayRemaining > 0) {
       codexRedeemAttempted = false;
     }
 
-    // Only redeem if weekly is exhausted and we haven't tried yet
     if (codexState.sevenDayRemaining !== 0) return;
     if (codexState.resetsAvailable === 0) return;
     if (codexRedeemAttempted) return;
@@ -614,13 +600,10 @@ export default function (pi: ExtensionAPI) {
     ctxRef = ctx;
     codexRedeemAttempted = false;
 
-    // Do not await: quota polling is network-bound and would block startup.
     void runCycle();
     scheduleCheck();
   });
 
-  // The status tracks the active model's provider, so re-render on switch
-  // rather than waiting for the next poll (up to 10 minutes away).
   pi.on('model_select', (_event, ctx) => {
     ctxRef = ctx;
     updateStatus();
