@@ -9,8 +9,11 @@
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import {
+  getAgentDir,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 
 interface QuotaConfig {
   codexResets?: { autoRedeem?: boolean };
@@ -119,7 +122,7 @@ function formatResetTime(reset: Date): string {
 
 async function loadConfig(): Promise<QuotaConfig | null> {
   try {
-    const settingsPath = join(homedir(), '.pi', 'agent', 'settings.json');
+    const settingsPath = join(getAgentDir(), 'settings.json');
     const settings = JSON.parse(await readFile(settingsPath, 'utf-8'));
     return settings.quota ?? null;
   } catch {
@@ -128,7 +131,7 @@ async function loadConfig(): Promise<QuotaConfig | null> {
 }
 
 function authPath() {
-  return join(homedir(), '.pi', 'agent', 'auth.json');
+  return join(getAgentDir(), 'auth.json');
 }
 
 async function loadAuth(): Promise<AuthFile | null> {
@@ -150,7 +153,7 @@ async function persistAuthRecord(provider: string, record: OAuthAuthRecord): Pro
 }
 
 function logPath() {
-  return join(homedir(), '.pi', 'agent', 'pi-quota.log');
+  return join(getAgentDir(), 'pi-quota.log');
 }
 
 async function logError(message: string, error?: unknown): Promise<void> {
