@@ -66,12 +66,12 @@ type CodexResetCreditList = {
 
 type CodexResetConsumeResponse = { code?: string };
 
-const MODEL_PROVIDER_NAMES: Record<QuotaState['provider'], string> = {
+const modelProviderNames: Record<QuotaState['provider'], string> = {
   anthropic: 'anthropic',
   'openai-codex': 'openai',
 };
 
-const REQUEST_TIMEOUT_MS = 30_000;
+const requestTimeoutMs = 30_000;
 
 function nextMarkAfter(time: Date): Date {
   const next = new Date(time.getTime());
@@ -180,7 +180,7 @@ export default function (pi: ExtensionAPI) {
   function buildStatusText(): string | undefined {
     const activeProvider = ctxRef?.model?.provider;
     if (!activeProvider) return undefined;
-    const state = states.find((s) => MODEL_PROVIDER_NAMES[s.provider] === activeProvider);
+    const state = states.find((s) => modelProviderNames[s.provider] === activeProvider);
 
     if (!state) return undefined;
 
@@ -245,7 +245,7 @@ export default function (pi: ExtensionAPI) {
   function pingProviderOnReset(provider: QuotaState['provider']) {
     const ctx = ctxRef;
     if (!ctx?.model) return;
-    if (ctx.model.provider !== MODEL_PROVIDER_NAMES[provider]) return;
+    if (ctx.model.provider !== modelProviderNames[provider]) return;
 
     const child = spawn(
       'pi',
@@ -306,7 +306,7 @@ export default function (pi: ExtensionAPI) {
         refresh_token: record.refresh,
         client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(requestTimeoutMs),
     });
 
     if (!response.ok) {
@@ -340,7 +340,7 @@ export default function (pi: ExtensionAPI) {
         refresh_token: record.refresh,
         client_id: 'app_EMoamEEZ73f0CkXaXp7hrann',
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(requestTimeoutMs),
     });
 
     if (!response.ok) {
@@ -371,7 +371,7 @@ export default function (pi: ExtensionAPI) {
             'User-Agent': 'pi-quota/1.0',
             accept: 'application/json',
           },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(requestTimeoutMs),
         },
       );
 
@@ -421,7 +421,7 @@ export default function (pi: ExtensionAPI) {
             credit_id: creditId,
             redeem_request_id: redeemRequestId,
           }),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(requestTimeoutMs),
         },
       );
 
@@ -450,7 +450,7 @@ export default function (pi: ExtensionAPI) {
             'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
             accept: 'application/json',
           },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(requestTimeoutMs),
         });
 
         if (response.ok) {
@@ -480,7 +480,7 @@ export default function (pi: ExtensionAPI) {
             'User-Agent': 'pi-quota/1.0',
             accept: 'application/json',
           },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(requestTimeoutMs),
         });
 
         if (response.ok) {
