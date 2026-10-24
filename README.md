@@ -12,11 +12,10 @@ Add `-l` to install it in project settings.
 
 ## Usage
 
-Pi loads the extension from `./index.ts` and shows the remaining quota for the provider backing the active model in the footer status line.
+Pi loads the extension from `./index.ts` and shows the remaining quota for the provider backing the active model above the editor.
 
 - Polls Anthropic and OpenAI Codex usage endpoints at every 10-minute wall-clock mark (`HH:00`, `HH:10`, `HH:20`, `HH:30`, `HH:40`, `HH:50`); polls immediately on session start, then aligns to the next mark
-- Shows a footer status for the provider backing the **active model**, and only when quota data for that provider has been polled; switching models re-renders it immediately
-- The status shares the footer line with other extensions, so it uses no extra terminal row
+- Shows a widget above the editor for the provider backing the **active model**, and only when quota data for that provider has been polled; switching models re-renders it immediately
 - The text stays compact, e.g. `93% 1h29m · 67% 3d13h`, where the 5-hour window comes first and the 7-day window second, and each window shows its remaining percentage followed by time until reset
 - Available resets, when present, are appended as `· 2x 5h` (count, then time until the soonest expires)
 - Both providers are still polled whenever their credentials exist, so quota is already fresh when the active model changes

@@ -207,9 +207,10 @@ export default function (pi: ExtensionAPI) {
 
     const text = buildStatusText();
 
-    ctxRef.ui.setStatus(
+    ctxRef.ui.setWidget(
       'pi-quota',
-      text === undefined ? undefined : ctxRef.ui.theme.fg('muted', text),
+      text === undefined ? undefined : [ctxRef.ui.theme.fg('muted', text)],
+      { placement: 'aboveEditor' },
     );
   }
 
