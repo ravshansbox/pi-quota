@@ -236,7 +236,7 @@ export default function (pi: ExtensionAPI) {
     const line = text === undefined ? undefined : ctxRef.ui.theme.fg('muted', text);
 
     ctxRef.ui.setWidget('pi-quota', line === undefined ? undefined : () => new Text(line, 0, 0), {
-      placement: 'aboveEditor',
+      placement: 'belowEditor',
     });
   }
 
