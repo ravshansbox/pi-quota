@@ -113,6 +113,31 @@ function formatResetTime(reset: Date): string {
   return 'now';
 }
 
+function parseAnthropicHeaderWindow(headers: Record<string, string>, name: string) {
+  const utilization = headers[`anthropic-ratelimit-unified-${name}-utilization`];
+  const reset = headers[`anthropic-ratelimit-unified-${name}-reset`];
+  return {
+    remaining: utilization === undefined ? null : clampPercent(100 - Number(utilization) * 100),
+    reset: reset === undefined ? null : new Date(Number(reset) * 1000),
+  };
+}
+
+function parseAnthropicHeaders(headers: Record<string, string>): QuotaState | null {
+  const fiveHour = parseAnthropicHeaderWindow(headers, '5h');
+  const sevenDay = parseAnthropicHeaderWindow(headers, '7d');
+  if (fiveHour.remaining === null && sevenDay.remaining === null) return null;
+  return {
+    provider: 'anthropic',
+    fiveHourRemaining: fiveHour.remaining,
+    fiveHourReset: fiveHour.reset,
+    sevenDayRemaining: sevenDay.remaining,
+    sevenDayReset: sevenDay.reset,
+    resetsAvailable: 0,
+    resetSoonestExpiry: null,
+    lastUpdated: new Date(),
+  };
+}
+
 async function loadConfig(): Promise<QuotaConfig | null> {
   try {
     const settingsPath = join(getAgentDir(), 'settings.json');
@@ -168,6 +193,7 @@ export default function (pi: ExtensionAPI) {
   const states: QuotaState[] = [];
   const refreshNotified = new Set<string>();
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
+  let anthropicPingTimer: ReturnType<typeof setTimeout> | null = null;
   let ctxRef: ExtensionContext | null = null;
   let codexRedeemAttempted = false;
   let cycleRunning = false;
@@ -272,14 +298,29 @@ export default function (pi: ExtensionAPI) {
     child.unref();
   }
 
+  function scheduleAnthropicPing(state: QuotaState) {
+    if (anthropicPingTimer) clearTimeout(anthropicPingTimer);
+    anthropicPingTimer = null;
+    const now = Date.now();
+    const resets = [state.fiveHourReset, state.sevenDayReset]
+      .map((reset) => reset?.getTime())
+      .filter((time): time is number => time !== undefined && time > now);
+    if (resets.length === 0) return;
+    anthropicPingTimer = setTimeout(
+      () => pingProviderOnReset('anthropic'),
+      Math.min(...resets) - now,
+    );
+  }
+
   function updateState(parsed: QuotaState) {
+    if (parsed.provider === 'anthropic') scheduleAnthropicPing(parsed);
     const existing = states.find((s) => s.provider === parsed.provider);
     if (!existing) {
       states.push(parsed);
       return;
     }
 
-    const shouldPing = shouldPingOnReset(existing, parsed);
+    const shouldPing = parsed.provider !== 'anthropic' && shouldPingOnReset(existing, parsed);
 
     existing.fiveHourRemaining = parsed.fiveHourRemaining;
     existing.fiveHourReset = parsed.fiveHourReset;
@@ -438,12 +479,12 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function pollQuotaStatus() {
+  async function pollQuotaStatus(includeAnthropic: boolean) {
     try {
       const auth = await loadAuth();
       if (!auth) return;
 
-      const anthropicAuth = await ensureAnthropicAccess(auth);
+      const anthropicAuth = includeAnthropic ? await ensureAnthropicAccess(auth) : undefined;
       if (anthropicAuth?.access) {
         const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
           headers: {
@@ -560,7 +601,7 @@ export default function (pi: ExtensionAPI) {
 
     if (result.code === 'reset') {
       ctxRef?.ui.notify('pi-quota: saved reset redeemed successfully', 'info');
-      await pollQuotaStatus();
+      await pollQuotaStatus(false);
       updateStatus();
     } else {
       logError(`Reset redeem returned code: ${result.code}`);
@@ -568,11 +609,11 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function runCycle() {
+  async function runCycle(includeAnthropic: boolean) {
     if (cycleRunning) return;
     cycleRunning = true;
     try {
-      await pollQuotaStatus();
+      await pollQuotaStatus(includeAnthropic);
       await tryAutoRedeemCodexReset();
       updateStatus();
     } catch (error) {
@@ -586,23 +627,36 @@ export default function (pi: ExtensionAPI) {
     const next = nextMarkAfter(new Date());
     const delay = Math.max(0, next.getTime() - Date.now());
     checkTimer = setTimeout(async () => {
-      await runCycle();
+      await runCycle(false);
       scheduleCheck();
     }, delay);
   }
 
+  function stopTimers() {
+    if (checkTimer) clearTimeout(checkTimer);
+    if (anthropicPingTimer) clearTimeout(anthropicPingTimer);
+    checkTimer = null;
+    anthropicPingTimer = null;
+  }
+
   pi.on('session_start', (_event, ctx) => {
-    if (checkTimer) {
-      clearTimeout(checkTimer);
-      checkTimer = null;
-    }
+    stopTimers();
     states.length = 0;
     refreshNotified.clear();
     ctxRef = ctx;
     codexRedeemAttempted = false;
 
-    void runCycle();
+    void runCycle(true);
     scheduleCheck();
+  });
+
+  pi.on('after_provider_response', (event, ctx) => {
+    if (ctx.model?.provider !== modelProviderNames.anthropic) return;
+    const next = parseAnthropicHeaders(event.headers);
+    if (!next) return;
+    ctxRef = ctx;
+    updateState(next);
+    updateStatus();
   });
 
   pi.on('model_select', (_event, ctx) => {
@@ -610,10 +664,7 @@ export default function (pi: ExtensionAPI) {
     updateStatus();
   });
 
-  pi.on('session_shutdown', async () => {
-    if (checkTimer) {
-      clearTimeout(checkTimer);
-      checkTimer = null;
-    }
+  pi.on('session_shutdown', () => {
+    stopTimers();
   });
 }

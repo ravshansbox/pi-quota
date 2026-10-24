@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
@@ -14,6 +14,7 @@ const minute = 60_000;
 
 let agentDir: string;
 const realFetch = globalThis.fetch;
+const realPath = process.env['PATH'];
 
 beforeEach(async () => {
   agentDir = await mkdtemp(join(tmpdir(), 'pi-quota-'));
@@ -22,17 +23,23 @@ beforeEach(async () => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  process.env['PATH'] = realPath;
   delete process.env['PI_CODING_AGENT_DIR'];
   mock.timers.reset();
 });
 
-async function waitFor(check: () => boolean) {
+async function waitFor(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    if (check()) return;
+    if (await check()) return;
     await new Promise((resolve) => setImmediate(resolve));
   }
   throw new Error('timed out');
+}
+
+async function settle(ms: number) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
 }
 
 function anthropicUsage(fiveHour: [number, number], sevenDay: [number, number]) {
@@ -105,4 +112,67 @@ test('shows the remaining Anthropic quota above the editor', async () => {
   session.stop();
 
   assert.equal(session.statuses.at(-1), '93% 1h29m · 67% 3d13h');
+});
+
+test('updates the Anthropic quota from response headers', async () => {
+  await writeAuth();
+  mockFetch(() => anthropicUsage([7, hour], [33, 2 * hour]));
+
+  const session = startSession();
+  await waitFor(() => session.statuses.length > 0);
+  const seconds = (ms: number) => String(Math.floor((Date.now() + ms) / 1000));
+  session.emit('after_provider_response', {
+    type: 'after_provider_response',
+    status: 200,
+    headers: {
+      'anthropic-ratelimit-unified-5h-utilization': '0.25',
+      'anthropic-ratelimit-unified-5h-reset': seconds(2 * hour + minute),
+      'anthropic-ratelimit-unified-7d-utilization': '0.4',
+      'anthropic-ratelimit-unified-7d-reset': seconds(26 * hour + minute),
+    },
+  });
+  session.stop();
+
+  assert.equal(session.statuses.at(-1), '75% 2h0m · 60% 1d2h');
+});
+
+test('calls the Anthropic usage endpoint only at session start', async () => {
+  await writeAuth();
+  const calls = mockFetch(() => anthropicUsage([7, 6 * hour], [33, 48 * hour]));
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession();
+  await waitFor(() => session.statuses.length > 0);
+  mock.timers.tick(30 * minute);
+  await settle(200);
+  session.stop();
+
+  assert.equal(calls.filter((url) => url.endsWith('/api/oauth/usage')).length, 1);
+});
+
+test('pings the active Anthropic model when a quota window resets', async () => {
+  const binDir = await mkdtemp(join(tmpdir(), 'pi-bin-'));
+  const argsFile = join(binDir, 'args');
+  await writeFile(join(binDir, 'pi'), `#!/bin/sh\necho "$@" > "${argsFile}"\n`);
+  await chmod(join(binDir, 'pi'), 0o755);
+  process.env['PATH'] = `${binDir}:${realPath}`;
+
+  await writeAuth();
+  mockFetch(() => anthropicUsage([90, hour], [50, 2 * hour]));
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession();
+  await waitFor(() => session.statuses.length > 0);
+  mock.timers.tick(hour);
+  await waitFor(async () => {
+    try {
+      return (await readFile(argsFile, 'utf-8')).length > 0;
+    } catch {
+      return false;
+    }
+  });
+  session.stop();
+
+  const args = await readFile(argsFile, 'utf-8');
+  assert.match(args, /--provider anthropic --model claude-sonnet-4-5 -p hi/);
 });
