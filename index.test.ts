@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import type { Component } from '@earendil-works/pi-tui';
 import extension from './index.ts';
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
@@ -86,13 +85,9 @@ function startSession() {
     cwd: agentDir,
     model: { provider: 'anthropic', id: 'claude-sonnet-4-5' },
     ui: {
-      setWidget: (
-        _key: string,
-        content: (() => Component) | undefined,
-        options?: { placement?: string },
-      ) => {
-        assert.equal(options?.placement, 'belowEditor');
-        statuses.push(content?.().render(80).join('\n').trimEnd());
+      setStatus: (key: string, text: string | undefined) => {
+        assert.equal(key, 'pi-quota');
+        statuses.push(text);
       },
       notify: () => {},
       theme: { fg: (_colour: string, text: string) => text },
@@ -108,7 +103,7 @@ function startSession() {
   };
 }
 
-test('shows the remaining Anthropic quota below the editor', async () => {
+test('shows the remaining Anthropic quota in the footer', async () => {
   await writeAuth();
   mockFetch(() => anthropicUsage([7, hour + 29 * minute + 30_000], [33, 85 * hour + 30 * minute]));
 

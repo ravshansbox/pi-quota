@@ -6,7 +6,6 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { Text } from '@earendil-works/pi-tui';
 
 interface QuotaConfig {
   codexResets?: { autoRedeem?: boolean };
@@ -235,9 +234,7 @@ export default function (pi: ExtensionAPI) {
     const text = buildStatusText();
     const line = text === undefined ? undefined : ctxRef.ui.theme.fg('muted', text);
 
-    ctxRef.ui.setWidget('pi-quota', line === undefined ? undefined : () => new Text(line, 0, 0), {
-      placement: 'belowEditor',
-    });
+    ctxRef.ui.setStatus('pi-quota', line);
   }
 
   function windowResetDetected(
