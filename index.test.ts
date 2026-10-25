@@ -359,3 +359,54 @@ test('polls Anthropic again when a new session starts during a poll', async () =
 
   assert.equal(session.statuses.at(-1), '<dim>7% 2h · 33% 2d</>');
 });
+
+test('redeems the soonest-expiring unexpired Codex reset', async () => {
+  await writeFile(
+    join(agentDir, 'auth.json'),
+    JSON.stringify({
+      'openai-codex': { access: 'token', refresh: 'r', expires: Date.now() + hour },
+    }),
+  );
+  await writeFile(
+    join(agentDir, 'settings.json'),
+    JSON.stringify({ quota: { codexResets: { autoRedeem: true } } }),
+  );
+  const seconds = (ms: number) => Math.floor((Date.now() + ms) / 1000);
+  const redeemed: string[] = [];
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/wham/usage')) {
+      return new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: { used_percent: 10, reset_at: seconds(2 * hour) },
+            secondary_window: { used_percent: 100, reset_at: seconds(26 * hour) },
+          },
+          rate_limit_reset_credits: { available_count: 3 },
+        }),
+      );
+    }
+    if (url.endsWith('/rate-limit-reset-credits')) {
+      return new Response(
+        JSON.stringify({
+          credits: [
+            { id: 'expired', status: 'available', expires_at: seconds(-hour) },
+            { id: 'late', status: 'available', expires_at: seconds(20 * 24 * hour) },
+            { id: 'soon', status: 'available', expires_at: seconds(2 * 24 * hour) },
+          ],
+        }),
+      );
+    }
+    if (url.endsWith('/consume')) {
+      redeemed.push(JSON.parse(String(init?.body)).credit_id);
+      return new Response(JSON.stringify({ code: 'reset' }));
+    }
+    return new Response('', { status: 500 });
+  }) as typeof fetch;
+
+  const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
+  await waitFor(() => redeemed.length > 0);
+  session.stop();
+
+  assert.deepEqual(redeemed, ['soon']);
+});

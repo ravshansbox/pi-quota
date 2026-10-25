@@ -428,18 +428,25 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function fetchCodexSoonestResetExpiry(accessToken: string): Promise<Date | null> {
-    const creditList = await listCodexResetCredits(accessToken);
-    if (!creditList) return null;
+  function soonestCodexResetCredit(
+    creditList: CodexResetCreditList,
+  ): { credit: CodexResetCredit; expiry: Date | null } | null {
     const now = Date.now();
-    let soonest: Date | null = null;
+    const time = (expiry: Date | null) => expiry?.getTime() ?? Infinity;
+    let soonest: { credit: CodexResetCredit; expiry: Date | null } | null = null;
     for (const credit of creditList.credits) {
       if (credit.status && credit.status !== 'available') continue;
       const expiry = parseCreditExpiry(credit.expires_at);
-      if (!expiry || expiry.getTime() <= now) continue;
-      if (!soonest || expiry.getTime() < soonest.getTime()) soonest = expiry;
+      if (expiry && expiry.getTime() <= now) continue;
+      if (!soonest || time(expiry) < time(soonest.expiry)) soonest = { credit, expiry };
     }
     return soonest;
+  }
+
+  async function fetchCodexSoonestResetExpiry(accessToken: string): Promise<Date | null> {
+    const creditList = await listCodexResetCredits(accessToken);
+    if (!creditList) return null;
+    return soonestCodexResetCredit(creditList)?.expiry ?? null;
   }
 
   async function consumeCodexResetCredit(
@@ -594,7 +601,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const availableCredit = creditList.credits.find((c) => c.status === 'available' || !c.status);
+    const availableCredit = soonestCodexResetCredit(creditList)?.credit;
     if (!availableCredit) {
       logError('No available reset credit found');
       return;
