@@ -289,3 +289,38 @@ test('shows the OpenAI Codex quota when the Anthropic request fails', async () =
 
   assert.equal(session.statuses.at(-1), '<dim>10% 2h · 40% 1d2h</>');
 });
+
+test('reads a Codex reset expiry given as a millisecond string', async () => {
+  await writeFile(
+    join(agentDir, 'auth.json'),
+    JSON.stringify({
+      'openai-codex': { access: 'token', refresh: 'r', expires: Date.now() + hour },
+    }),
+  );
+  const seconds = (ms: number) => Math.floor((Date.now() + ms) / 1000);
+  mockFetch((url) => {
+    if (url.endsWith('/wham/usage')) {
+      return {
+        rate_limit: {
+          primary_window: { used_percent: 10, reset_at: seconds(2 * hour + 30_000) },
+          secondary_window: { used_percent: 40, reset_at: seconds(26 * hour + 30_000) },
+        },
+        rate_limit_reset_credits: { available_count: 1 },
+      };
+    }
+    if (url.endsWith('/wham/rate-limit-reset-credits')) {
+      return {
+        credits: [
+          { id: 'c1', status: 'available', expires_at: String(Date.now() + 5 * hour + 30_000) },
+        ],
+      };
+    }
+    return undefined;
+  });
+
+  const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
+  await waitFor(() => session.statuses.length > 0);
+  session.stop();
+
+  assert.equal(session.statuses.at(-1), '<dim>10% 2h · 40% 1d2h · 1x 5h</>');
+});

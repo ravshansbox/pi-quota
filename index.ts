@@ -88,13 +88,12 @@ function clampPercent(value: number): number {
 
 function parseCreditExpiry(value: string | number | undefined): Date | null {
   if (value === undefined || value === null) return null;
-  if (typeof value === 'number') {
-    const ms = value > 10_000_000_000 ? value : value * 1000;
-    const date = new Date(ms);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-  const text = value.trim();
-  const date = /^\d+$/.test(text) ? new Date(Number(text) * 1000) : new Date(text);
+  const text = String(value).trim();
+  const numeric = /^\d+(\.\d+)?$/.test(text) ? Number(text) : null;
+  const date =
+    numeric === null
+      ? new Date(text)
+      : new Date(numeric > 10_000_000_000 ? numeric : numeric * 1000);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
