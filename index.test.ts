@@ -103,7 +103,7 @@ function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }
   };
 }
 
-test('shows the remaining Anthropic quota in the footer', async () => {
+test('shows the used Anthropic quota in the footer', async () => {
   await writeAuth();
   mockFetch(() => anthropicUsage([7, hour + 29 * minute + 30_000], [33, 85 * hour + 30 * minute]));
 
@@ -111,7 +111,7 @@ test('shows the remaining Anthropic quota in the footer', async () => {
   await waitFor(() => session.statuses.length > 0);
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '<dim>93% 1h29m · 67% 4d</>');
+  assert.equal(session.statuses.at(-1), '<dim>7% 1h29m · 33% 4d</>');
 });
 
 test('updates the Anthropic quota from response headers', async () => {
@@ -133,7 +133,7 @@ test('updates the Anthropic quota from response headers', async () => {
   });
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '<dim>75% 2h · 60% 1d2h</>');
+  assert.equal(session.statuses.at(-1), '<dim>25% 2h · 40% 1d2h</>');
 });
 
 test('calls the Anthropic usage endpoint only at session start', async () => {
@@ -177,7 +177,7 @@ test('pings the active Anthropic model when a quota window resets', async () => 
   assert.match(args, /--provider anthropic --model claude-sonnet-4-5 -p hi/);
 });
 
-test('shows the remaining OpenAI Codex quota for a Codex model', async () => {
+test('shows the used OpenAI Codex quota for a Codex model', async () => {
   await writeFile(
     join(agentDir, 'auth.json'),
     JSON.stringify({
@@ -200,7 +200,7 @@ test('shows the remaining OpenAI Codex quota for a Codex model', async () => {
   await waitFor(() => session.statuses.length > 0);
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '<dim>90% 2h · 60% 1d2h</>');
+  assert.equal(session.statuses.at(-1), '<dim>10% 2h · 40% 1d2h</>');
 });
 
 test('stops polling after session shutdown during a poll', async () => {

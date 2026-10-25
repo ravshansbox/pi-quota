@@ -13,9 +13,9 @@ interface QuotaConfig {
 
 interface QuotaState {
   provider: 'anthropic' | 'openai-codex';
-  fiveHourRemaining: number | null;
+  fiveHourUsed: number | null;
   fiveHourReset: Date | null;
-  sevenDayRemaining: number | null;
+  sevenDayUsed: number | null;
   sevenDayReset: Date | null;
   resetsAvailable: number;
   resetSoonestExpiry: Date | null;
@@ -118,7 +118,7 @@ function parseAnthropicHeaderWindow(headers: Record<string, string>, name: strin
   const utilization = headers[`anthropic-ratelimit-unified-${name}-utilization`];
   const reset = headers[`anthropic-ratelimit-unified-${name}-reset`];
   return {
-    remaining: utilization === undefined ? null : clampPercent(100 - Number(utilization) * 100),
+    used: utilization === undefined ? null : clampPercent(Number(utilization) * 100),
     reset: reset === undefined ? null : new Date(Number(reset) * 1000),
   };
 }
@@ -126,12 +126,12 @@ function parseAnthropicHeaderWindow(headers: Record<string, string>, name: strin
 function parseAnthropicHeaders(headers: Record<string, string>): QuotaState | null {
   const fiveHour = parseAnthropicHeaderWindow(headers, '5h');
   const sevenDay = parseAnthropicHeaderWindow(headers, '7d');
-  if (fiveHour.remaining === null && sevenDay.remaining === null) return null;
+  if (fiveHour.used === null && sevenDay.used === null) return null;
   return {
     provider: 'anthropic',
-    fiveHourRemaining: fiveHour.remaining,
+    fiveHourUsed: fiveHour.used,
     fiveHourReset: fiveHour.reset,
-    sevenDayRemaining: sevenDay.remaining,
+    sevenDayUsed: sevenDay.used,
     sevenDayReset: sevenDay.reset,
     resetsAvailable: 0,
     resetSoonestExpiry: null,
@@ -213,13 +213,13 @@ export default function (pi: ExtensionAPI) {
     if (!state) return undefined;
 
     const parts: string[] = [];
-    if (state.fiveHourRemaining !== null) {
+    if (state.fiveHourUsed !== null) {
       const resetStr = state.fiveHourReset ? formatResetTime(state.fiveHourReset) : '?';
-      parts.push(`${state.fiveHourRemaining}% ${resetStr}`);
+      parts.push(`${state.fiveHourUsed}% ${resetStr}`);
     }
-    if (state.sevenDayRemaining !== null) {
+    if (state.sevenDayUsed !== null) {
       const resetStr = state.sevenDayReset ? formatResetTime(state.sevenDayReset) : '?';
-      parts.push(`${state.sevenDayRemaining}% ${resetStr}`);
+      parts.push(`${state.sevenDayUsed}% ${resetStr}`);
     }
     if (state.resetsAvailable > 0) {
       const expiryStr = state.resetSoonestExpiry
@@ -242,13 +242,13 @@ export default function (pi: ExtensionAPI) {
   function windowResetDetected(
     previousReset: Date | null,
     nextReset: Date | null,
-    previousRemaining: number | null,
-    nextRemaining: number | null,
+    previousUsed: number | null,
+    nextUsed: number | null,
   ): boolean {
     if (!previousReset || !nextReset) return false;
     if (nextReset.getTime() <= previousReset.getTime()) return false;
-    if (previousRemaining === null || nextRemaining === null) return false;
-    return nextRemaining > previousRemaining;
+    if (previousUsed === null || nextUsed === null) return false;
+    return nextUsed < previousUsed;
   }
 
   function shouldPingOnReset(previous: QuotaState, next: QuotaState): boolean {
@@ -256,14 +256,14 @@ export default function (pi: ExtensionAPI) {
       windowResetDetected(
         previous.fiveHourReset,
         next.fiveHourReset,
-        previous.fiveHourRemaining,
-        next.fiveHourRemaining,
+        previous.fiveHourUsed,
+        next.fiveHourUsed,
       ) ||
       windowResetDetected(
         previous.sevenDayReset,
         next.sevenDayReset,
-        previous.sevenDayRemaining,
-        next.sevenDayRemaining,
+        previous.sevenDayUsed,
+        next.sevenDayUsed,
       )
     );
   }
@@ -321,9 +321,9 @@ export default function (pi: ExtensionAPI) {
 
     const shouldPing = parsed.provider !== 'anthropic' && shouldPingOnReset(existing, parsed);
 
-    existing.fiveHourRemaining = parsed.fiveHourRemaining;
+    existing.fiveHourUsed = parsed.fiveHourUsed;
     existing.fiveHourReset = parsed.fiveHourReset;
-    existing.sevenDayRemaining = parsed.sevenDayRemaining;
+    existing.sevenDayUsed = parsed.sevenDayUsed;
     existing.sevenDayReset = parsed.sevenDayReset;
     existing.resetsAvailable = parsed.resetsAvailable;
     existing.resetSoonestExpiry = parsed.resetSoonestExpiry;
@@ -500,9 +500,9 @@ export default function (pi: ExtensionAPI) {
           const sevenDay = data.seven_day;
           updateState({
             provider: 'anthropic',
-            fiveHourRemaining: fiveHour ? clampPercent(100 - (fiveHour.utilization ?? 0)) : null,
+            fiveHourUsed: fiveHour ? clampPercent(fiveHour.utilization ?? 0) : null,
             fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
-            sevenDayRemaining: sevenDay ? clampPercent(100 - (sevenDay.utilization ?? 0)) : null,
+            sevenDayUsed: sevenDay ? clampPercent(sevenDay.utilization ?? 0) : null,
             sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
             resetsAvailable: 0,
             resetSoonestExpiry: null,
@@ -536,9 +536,9 @@ export default function (pi: ExtensionAPI) {
               resetsAvailable !== undefined ? Math.max(0, Math.trunc(resetsAvailable)) : 0;
             updateState({
               provider: 'openai-codex',
-              fiveHourRemaining: fiveHour ? clampPercent(100 - (fiveHour.used_percent ?? 0)) : null,
+              fiveHourUsed: fiveHour ? clampPercent(fiveHour.used_percent ?? 0) : null,
               fiveHourReset: fiveHour?.reset_at ? new Date(fiveHour.reset_at * 1000) : null,
-              sevenDayRemaining: sevenDay ? clampPercent(100 - (sevenDay.used_percent ?? 0)) : null,
+              sevenDayUsed: sevenDay ? clampPercent(sevenDay.used_percent ?? 0) : null,
               sevenDayReset: sevenDay?.reset_at ? new Date(sevenDay.reset_at * 1000) : null,
               resetsAvailable: resetCount,
               resetSoonestExpiry:
@@ -562,11 +562,11 @@ export default function (pi: ExtensionAPI) {
     const codexState = states.find((s) => s.provider === 'openai-codex');
     if (!codexState) return;
 
-    if (codexState.sevenDayRemaining !== null && codexState.sevenDayRemaining > 0) {
+    if (codexState.sevenDayUsed !== null && codexState.sevenDayUsed < 100) {
       codexRedeemAttempted = false;
     }
 
-    if (codexState.sevenDayRemaining !== 0) return;
+    if (codexState.sevenDayUsed !== 100) return;
     if (codexState.resetsAvailable === 0) return;
     if (codexRedeemAttempted) return;
 
