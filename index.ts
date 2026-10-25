@@ -303,21 +303,18 @@ export default function (pi: ExtensionAPI) {
     child.unref();
   }
 
-  function scheduleAnthropicPing(state: QuotaState) {
+  function scheduleAnthropicPing(state: QuotaState, after = Date.now()) {
     if (anthropicPingTimer) clearTimeout(anthropicPingTimer);
     anthropicPingTimer = null;
-    const now = Date.now();
     const resets = [state.fiveHourReset, state.sevenDayReset]
       .map((reset) => reset?.getTime())
-      .filter((time): time is number => time !== undefined && time > now);
+      .filter((time): time is number => time !== undefined && time > after);
     if (resets.length === 0) return;
-    anthropicPingTimer = setTimeout(
-      () => {
-        pingProviderOnReset('anthropic');
-        scheduleAnthropicPing(state);
-      },
-      Math.min(...resets) - now,
-    );
+    const next = Math.min(...resets);
+    anthropicPingTimer = setTimeout(() => {
+      pingProviderOnReset('anthropic');
+      scheduleAnthropicPing(state, next);
+    }, next - Date.now());
   }
 
   function updateState(parsed: QuotaState) {

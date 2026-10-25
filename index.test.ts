@@ -198,6 +198,35 @@ test('pings the active Anthropic model again when the later quota window resets'
   session.stop();
 });
 
+test('pings once per Anthropic quota window reset when the timer fires early', async () => {
+  const binDir = await mkdtemp(join(tmpdir(), 'pi-bin-'));
+  const argsFile = join(binDir, 'args');
+  await writeFile(join(binDir, 'pi'), `#!/bin/sh\necho "$@" >> "${argsFile}"\nsleep 1\n`);
+  await chmod(join(binDir, 'pi'), 0o755);
+  process.env['PATH'] = `${binDir}:${realPath}`;
+
+  await writeAuth();
+  mockFetch(() => anthropicUsage([90, hour], [50, 48 * hour]));
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession();
+  await waitFor(() => session.statuses.length > 0);
+  mock.timers.tick(hour);
+  mock.timers.tick(hour);
+  const pings = async () => {
+    try {
+      return (await readFile(argsFile, 'utf-8')).trim().split('\n').length;
+    } catch {
+      return 0;
+    }
+  };
+  await waitFor(async () => (await pings()) > 0);
+  await settle(300);
+  session.stop();
+
+  assert.equal(await pings(), 1);
+});
+
 test('refreshes the Anthropic quota after the reset ping', async () => {
   const binDir = await mkdtemp(join(tmpdir(), 'pi-bin-'));
   await writeFile(join(binDir, 'pi'), '#!/bin/sh\nexit 0\n');
