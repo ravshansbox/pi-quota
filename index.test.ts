@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { Component } from '@earendil-works/pi-tui';
 import extension from './index.ts';
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
@@ -80,14 +81,20 @@ function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }
   } as unknown as ExtensionAPI;
   extension(pi);
 
-  const statuses: (string | undefined)[] = [];
+  const widgets: (string | undefined)[] = [];
   const ctx = {
     cwd: agentDir,
     model,
     ui: {
-      setStatus: (key: string, text: string | undefined) => {
+      setWidget: (
+        key: string,
+        content: ((tui: unknown, theme: unknown) => Component) | undefined,
+        options?: { placement?: string },
+      ) => {
         assert.equal(key, 'pi-quota');
-        statuses.push(text);
+        if (content === undefined) return widgets.push(undefined);
+        assert.equal(options?.placement, 'aboveEditor');
+        widgets.push(content({}, {}).render(80).join('\n').trimEnd());
       },
       notify: () => {},
       theme: { fg: (_colour: string, text: string) => text },
@@ -96,22 +103,22 @@ function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }
   handlers.get('session_start')?.({}, ctx);
 
   return {
-    statuses,
+    widgets,
     ctx,
     emit: (event: string, payload: unknown) => handlers.get(event)?.(payload, ctx),
     stop: () => handlers.get('session_shutdown')?.({}, ctx),
   };
 }
 
-test('shows the remaining Anthropic quota in the footer', async () => {
+test('shows the remaining Anthropic quota above the editor', async () => {
   await writeAuth();
   mockFetch(() => anthropicUsage([7, hour + 29 * minute + 30_000], [33, 85 * hour + 30 * minute]));
 
   const session = startSession();
-  await waitFor(() => session.statuses.length > 0);
+  await waitFor(() => session.widgets.length > 0);
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '93% 1h29m · 67% 3d13h');
+  assert.equal(session.widgets.at(-1), '93% 1h29m · 67% 3d13h');
 });
 
 test('updates the Anthropic quota from response headers', async () => {
@@ -119,7 +126,7 @@ test('updates the Anthropic quota from response headers', async () => {
   mockFetch(() => anthropicUsage([7, hour], [33, 2 * hour]));
 
   const session = startSession();
-  await waitFor(() => session.statuses.length > 0);
+  await waitFor(() => session.widgets.length > 0);
   const seconds = (ms: number) => String(Math.floor((Date.now() + ms) / 1000));
   session.emit('after_provider_response', {
     type: 'after_provider_response',
@@ -133,7 +140,7 @@ test('updates the Anthropic quota from response headers', async () => {
   });
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '75% 2h0m · 60% 1d2h');
+  assert.equal(session.widgets.at(-1), '75% 2h0m · 60% 1d2h');
 });
 
 test('calls the Anthropic usage endpoint only at session start', async () => {
@@ -142,7 +149,7 @@ test('calls the Anthropic usage endpoint only at session start', async () => {
   mock.timers.enable({ apis: ['setTimeout'] });
 
   const session = startSession();
-  await waitFor(() => session.statuses.length > 0);
+  await waitFor(() => session.widgets.length > 0);
   mock.timers.tick(30 * minute);
   await settle(200);
   session.stop();
@@ -162,7 +169,7 @@ test('pings the active Anthropic model when a quota window resets', async () => 
   mock.timers.enable({ apis: ['setTimeout'] });
 
   const session = startSession();
-  await waitFor(() => session.statuses.length > 0);
+  await waitFor(() => session.widgets.length > 0);
   mock.timers.tick(hour);
   await waitFor(async () => {
     try {
@@ -197,10 +204,10 @@ test('shows the remaining OpenAI Codex quota for a Codex model', async () => {
   );
 
   const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
-  await waitFor(() => session.statuses.length > 0);
+  await waitFor(() => session.widgets.length > 0);
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '90% 2h0m · 60% 1d2h');
+  assert.equal(session.widgets.at(-1), '90% 2h0m · 60% 1d2h');
 });
 
 test('stops polling after session shutdown during a poll', async () => {
@@ -220,7 +227,7 @@ test('stops polling after session shutdown during a poll', async () => {
   mock.timers.enable({ apis: ['setTimeout'] });
 
   const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
-  await waitFor(() => session.statuses.length > 0);
+  await waitFor(() => session.widgets.length > 0);
   mock.timers.tick(10 * minute);
   await waitFor(() => calls === 2);
   session.stop();
