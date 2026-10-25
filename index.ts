@@ -17,6 +17,7 @@ interface QuotaState {
   fiveHourReset: Date | null;
   sevenDayUsed: number | null;
   sevenDayReset: Date | null;
+  sevenDayExhausted: boolean;
   resetsAvailable: number;
   resetSoonestExpiry: Date | null;
   lastUpdated: Date;
@@ -132,6 +133,7 @@ function parseAnthropicHeaders(headers: Record<string, string>): QuotaState | nu
     fiveHourReset: fiveHour.reset,
     sevenDayUsed: sevenDay.used,
     sevenDayReset: sevenDay.reset,
+    sevenDayExhausted: false,
     resetsAvailable: 0,
     resetSoonestExpiry: null,
     lastUpdated: new Date(),
@@ -325,6 +327,7 @@ export default function (pi: ExtensionAPI) {
     existing.fiveHourReset = parsed.fiveHourReset;
     existing.sevenDayUsed = parsed.sevenDayUsed;
     existing.sevenDayReset = parsed.sevenDayReset;
+    existing.sevenDayExhausted = parsed.sevenDayExhausted;
     existing.resetsAvailable = parsed.resetsAvailable;
     existing.resetSoonestExpiry = parsed.resetSoonestExpiry;
     existing.lastUpdated = parsed.lastUpdated;
@@ -512,6 +515,7 @@ export default function (pi: ExtensionAPI) {
         fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
         sevenDayUsed: sevenDay ? clampPercent(sevenDay.utilization ?? 0) : null,
         sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
+        sevenDayExhausted: false,
         resetsAvailable: 0,
         resetSoonestExpiry: null,
         lastUpdated: new Date(),
@@ -555,6 +559,7 @@ export default function (pi: ExtensionAPI) {
               fiveHourReset: fiveHour?.reset_at ? new Date(fiveHour.reset_at * 1000) : null,
               sevenDayUsed: sevenDay ? clampPercent(sevenDay.used_percent ?? 0) : null,
               sevenDayReset: sevenDay?.reset_at ? new Date(sevenDay.reset_at * 1000) : null,
+              sevenDayExhausted: (sevenDay?.used_percent ?? 0) >= 100,
               resetsAvailable: resetCount,
               resetSoonestExpiry:
                 resetCount > 0 ? await fetchCodexSoonestResetExpiry(openaiAuth.access) : null,
@@ -577,11 +582,11 @@ export default function (pi: ExtensionAPI) {
     const codexState = states.find((s) => s.provider === 'openai-codex');
     if (!codexState) return;
 
-    if (codexState.sevenDayUsed !== null && codexState.sevenDayUsed < 100) {
+    if (codexState.sevenDayUsed !== null && !codexState.sevenDayExhausted) {
       codexRedeemAttempted = false;
     }
 
-    if (codexState.sevenDayUsed !== 100) return;
+    if (!codexState.sevenDayExhausted) return;
     if (codexState.resetsAvailable === 0) return;
     if (codexRedeemAttempted) return;
 

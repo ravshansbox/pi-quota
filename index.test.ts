@@ -410,3 +410,51 @@ test('redeems the soonest-expiring unexpired Codex reset', async () => {
 
   assert.deepEqual(redeemed, ['soon']);
 });
+
+test('does not redeem a Codex reset before the weekly limit is fully used', async () => {
+  await writeFile(
+    join(agentDir, 'auth.json'),
+    JSON.stringify({
+      'openai-codex': { access: 'token', refresh: 'r', expires: Date.now() + hour },
+    }),
+  );
+  await writeFile(
+    join(agentDir, 'settings.json'),
+    JSON.stringify({ quota: { codexResets: { autoRedeem: true } } }),
+  );
+  const seconds = (ms: number) => Math.floor((Date.now() + ms) / 1000);
+  const redeemed: string[] = [];
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/wham/usage')) {
+      return new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: { used_percent: 10, reset_at: seconds(2 * hour) },
+            secondary_window: { used_percent: 99.6, reset_at: seconds(26 * hour) },
+          },
+          rate_limit_reset_credits: { available_count: 1 },
+        }),
+      );
+    }
+    if (url.endsWith('/rate-limit-reset-credits')) {
+      return new Response(
+        JSON.stringify({
+          credits: [{ id: 'soon', status: 'available', expires_at: seconds(2 * 24 * hour) }],
+        }),
+      );
+    }
+    if (url.endsWith('/consume')) {
+      redeemed.push(JSON.parse(String(init?.body)).credit_id);
+      return new Response(JSON.stringify({ code: 'reset' }));
+    }
+    return new Response('', { status: 500 });
+  }) as typeof fetch;
+
+  const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
+  await waitFor(() => session.statuses.length > 0);
+  await settle(50);
+  session.stop();
+
+  assert.deepEqual(redeemed, []);
+});
