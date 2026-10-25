@@ -73,7 +73,7 @@ async function writeAuth() {
   );
 }
 
-function startSession() {
+function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }) {
   const handlers = new Map<string, Handler>();
   const pi = {
     on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -83,7 +83,7 @@ function startSession() {
   const statuses: (string | undefined)[] = [];
   const ctx = {
     cwd: agentDir,
-    model: { provider: 'anthropic', id: 'claude-sonnet-4-5' },
+    model,
     ui: {
       setStatus: (key: string, text: string | undefined) => {
         assert.equal(key, 'pi-quota');
@@ -175,4 +175,30 @@ test('pings the active Anthropic model when a quota window resets', async () => 
 
   const args = await readFile(argsFile, 'utf-8');
   assert.match(args, /--provider anthropic --model claude-sonnet-4-5 -p hi/);
+});
+
+test('shows the remaining OpenAI Codex quota for a Codex model', async () => {
+  await writeFile(
+    join(agentDir, 'auth.json'),
+    JSON.stringify({
+      'openai-codex': { access: 'token', refresh: 'r', expires: Date.now() + hour },
+    }),
+  );
+  const seconds = (ms: number) => Math.floor((Date.now() + ms) / 1000);
+  mockFetch((url) =>
+    url.endsWith('/wham/usage')
+      ? {
+          rate_limit: {
+            primary_window: { used_percent: 10, reset_at: seconds(2 * hour + 30_000) },
+            secondary_window: { used_percent: 40, reset_at: seconds(26 * hour + 30_000) },
+          },
+        }
+      : undefined,
+  );
+
+  const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
+  await waitFor(() => session.statuses.length > 0);
+  session.stop();
+
+  assert.equal(session.statuses.at(-1), '90% 2h0m · 60% 1d2h');
 });

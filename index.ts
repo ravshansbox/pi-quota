@@ -68,7 +68,7 @@ type CodexResetConsumeResponse = { code?: string };
 
 const modelProviderNames: Record<QuotaState['provider'], string> = {
   anthropic: 'anthropic',
-  'openai-codex': 'openai',
+  'openai-codex': 'openai-codex',
 };
 
 const requestTimeoutMs = 30_000;
