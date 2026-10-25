@@ -204,6 +204,29 @@ test('pings the active Anthropic model again when the later quota window resets'
   session.stop();
 });
 
+test('refreshes the Anthropic quota after the reset ping', async () => {
+  const binDir = await mkdtemp(join(tmpdir(), 'pi-bin-'));
+  await writeFile(join(binDir, 'pi'), '#!/bin/sh\nexit 0\n');
+  await chmod(join(binDir, 'pi'), 0o755);
+  process.env['PATH'] = `${binDir}:${realPath}`;
+
+  await writeAuth();
+  let polls = 0;
+  mockFetch(() => {
+    polls += 1;
+    return polls === 1
+      ? anthropicUsage([90, hour], [50, 48 * hour])
+      : anthropicUsage([1, 5 * hour], [51, 50 * hour]);
+  });
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession();
+  await waitFor(() => session.statuses.length > 0);
+  mock.timers.tick(hour);
+  await waitFor(() => session.statuses.at(-1) === '<dim>1% 5h · 51% 2d</>');
+  session.stop();
+});
+
 test('shows the used OpenAI Codex quota for a Codex model', async () => {
   await writeFile(
     join(agentDir, 'auth.json'),

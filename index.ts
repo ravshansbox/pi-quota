@@ -294,6 +294,7 @@ export default function (pi: ExtensionAPI) {
     child.on('error', (error: unknown) => {
       void logError(`Reset ping failed for ${provider}:`, error);
     });
+    if (provider === 'anthropic') child.on('exit', () => void runCycle(true));
 
     child.unref();
   }
