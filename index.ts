@@ -479,40 +479,48 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  async function pollAnthropicQuota(auth: AuthFile) {
+    try {
+      const anthropicAuth = await ensureAnthropicAccess(auth);
+      if (!anthropicAuth?.access) return;
+      const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
+        headers: {
+          Authorization: `Bearer ${anthropicAuth.access}`,
+          'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+          accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+
+      if (!response.ok) {
+        logError(`Anthropic usage request failed: ${response.status}`);
+        return;
+      }
+
+      const data = (await response.json()) as AnthropicUsageResponse;
+      const fiveHour = data.five_hour;
+      const sevenDay = data.seven_day;
+      updateState({
+        provider: 'anthropic',
+        fiveHourUsed: fiveHour ? clampPercent(fiveHour.utilization ?? 0) : null,
+        fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
+        sevenDayUsed: sevenDay ? clampPercent(sevenDay.utilization ?? 0) : null,
+        sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
+        resetsAvailable: 0,
+        resetSoonestExpiry: null,
+        lastUpdated: new Date(),
+      });
+    } catch (error) {
+      logError('Anthropic poll error:', error);
+    }
+  }
+
   async function pollQuotaStatus(includeAnthropic: boolean) {
     try {
       const auth = await loadAuth();
       if (!auth) return;
 
-      const anthropicAuth = includeAnthropic ? await ensureAnthropicAccess(auth) : undefined;
-      if (anthropicAuth?.access) {
-        const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
-          headers: {
-            Authorization: `Bearer ${anthropicAuth.access}`,
-            'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
-            accept: 'application/json',
-          },
-          signal: AbortSignal.timeout(requestTimeoutMs),
-        });
-
-        if (response.ok) {
-          const data = (await response.json()) as AnthropicUsageResponse;
-          const fiveHour = data.five_hour;
-          const sevenDay = data.seven_day;
-          updateState({
-            provider: 'anthropic',
-            fiveHourUsed: fiveHour ? clampPercent(fiveHour.utilization ?? 0) : null,
-            fiveHourReset: fiveHour?.resets_at ? new Date(fiveHour.resets_at) : null,
-            sevenDayUsed: sevenDay ? clampPercent(sevenDay.utilization ?? 0) : null,
-            sevenDayReset: sevenDay?.resets_at ? new Date(sevenDay.resets_at) : null,
-            resetsAvailable: 0,
-            resetSoonestExpiry: null,
-            lastUpdated: new Date(),
-          });
-        } else {
-          logError(`Anthropic usage request failed: ${response.status}`);
-        }
-      }
+      if (includeAnthropic) await pollAnthropicQuota(auth);
 
       const openaiAuth = await ensureOpenAIAccess(auth);
       if (openaiAuth?.access) {

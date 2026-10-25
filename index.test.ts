@@ -261,3 +261,31 @@ test('ignores an Anthropic usage response that arrives after shutdown', async ()
   assert.deepEqual(session.statuses, []);
   await assert.rejects(readFile(join(agentDir, 'pi-quota.log'), 'utf-8'));
 });
+
+test('shows the OpenAI Codex quota when the Anthropic request fails', async () => {
+  await writeFile(
+    join(agentDir, 'auth.json'),
+    JSON.stringify({
+      anthropic: { access: 'token', refresh: 'r', expires: Date.now() + hour },
+      'openai-codex': { access: 'token', refresh: 'r', expires: Date.now() + hour },
+    }),
+  );
+  const seconds = (ms: number) => Math.floor((Date.now() + ms) / 1000);
+  globalThis.fetch = (async (input: string | URL) => {
+    if (String(input).endsWith('/api/oauth/usage')) throw new Error('network down');
+    return new Response(
+      JSON.stringify({
+        rate_limit: {
+          primary_window: { used_percent: 10, reset_at: seconds(2 * hour + 30_000) },
+          secondary_window: { used_percent: 40, reset_at: seconds(26 * hour + 30_000) },
+        },
+      }),
+    );
+  }) as typeof fetch;
+
+  const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
+  await waitFor(() => session.statuses.length > 0);
+  session.stop();
+
+  assert.equal(session.statuses.at(-1), '<dim>10% 2h · 40% 1d2h</>');
+});
