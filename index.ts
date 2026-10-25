@@ -296,7 +296,7 @@ export default function (pi: ExtensionAPI) {
     });
     if (provider === 'anthropic') {
       child.on('exit', () => {
-        if (ctxRef) void (cycle ?? Promise.resolve()).then(() => runCycle(true));
+        void (cycle ?? Promise.resolve()).then(() => (ctxRef ? runCycle(true) : undefined));
       });
     }
 

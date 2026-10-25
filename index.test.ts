@@ -158,19 +158,13 @@ test('pings the active Anthropic model when a quota window resets', async () => 
   process.env['PATH'] = `${binDir}:${realPath}`;
 
   await writeAuth();
-  mockFetch(() => anthropicUsage([90, hour], [50, 2 * hour]));
+  const calls = mockFetch(() => anthropicUsage([90, hour], [50, 2 * hour]));
   mock.timers.enable({ apis: ['setTimeout'] });
 
   const session = startSession();
   await waitFor(() => session.statuses.length > 0);
   mock.timers.tick(hour);
-  await waitFor(async () => {
-    try {
-      return (await readFile(argsFile, 'utf-8')).length > 0;
-    } catch {
-      return false;
-    }
-  });
+  await waitFor(() => calls.length === 2);
   session.stop();
 
   const args = await readFile(argsFile, 'utf-8');
@@ -186,7 +180,7 @@ test('pings the active Anthropic model again when the later quota window resets'
 
   await writeAuth();
   mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
-  mockFetch(() => anthropicUsage([90, hour], [50, 2 * hour]));
+  const calls = mockFetch(() => anthropicUsage([90, hour], [50, 2 * hour]));
   const pings = async () => {
     try {
       return (await readFile(argsFile, 'utf-8')).trim().split('\n').length;
@@ -200,7 +194,7 @@ test('pings the active Anthropic model again when the later quota window resets'
   mock.timers.tick(hour);
   await waitFor(async () => (await pings()) === 1);
   mock.timers.tick(hour);
-  await waitFor(async () => (await pings()) === 2);
+  await waitFor(async () => (await pings()) === 2 && calls.length === 3);
   session.stop();
 });
 
