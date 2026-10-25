@@ -271,8 +271,13 @@ export default function (pi: ExtensionAPI) {
 
   function pingProviderOnReset(provider: QuotaState['provider']) {
     const ctx = ctxRef;
-    if (!ctx?.model) return;
-    if (ctx.model.provider !== modelProviderNames[provider]) return;
+    if (!ctx) return;
+    if (ctx.model?.provider !== modelProviderNames[provider]) {
+      if (provider === 'anthropic') {
+        void (cycle ?? Promise.resolve()).then(() => (ctxRef ? runCycle(true) : undefined));
+      }
+      return;
+    }
 
     const child = spawn(
       'pi',

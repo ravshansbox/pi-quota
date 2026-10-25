@@ -250,6 +250,30 @@ test('refreshes the Anthropic quota after the reset ping', async () => {
   session.stop();
 });
 
+test('reloads the Anthropic quota at reset when the active model is not Anthropic', async () => {
+  await writeAuth();
+  let polls = 0;
+  mockFetch(() => {
+    polls += 1;
+    return polls === 1
+      ? anthropicUsage([90, hour], [50, 48 * hour])
+      : anthropicUsage([1, 5 * hour], [51, 50 * hour]);
+  });
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession({ provider: 'openai-codex', id: 'gpt-5' });
+  await waitFor(() => polls === 1);
+  await settle(50);
+  mock.timers.tick(hour);
+  await waitFor(() => polls === 2);
+  await settle(50);
+  session.ctx.model = { provider: 'anthropic', id: 'claude-sonnet-4-5' };
+  session.emit('model_select', {});
+  session.stop();
+
+  assert.equal(session.statuses.at(-1), '<dim>1% 5h · 51% 2d</>');
+});
+
 test('shows the used OpenAI Codex quota for a Codex model', async () => {
   await writeFile(
     join(agentDir, 'auth.json'),
