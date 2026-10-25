@@ -231,3 +231,33 @@ test('stops polling after session shutdown during a poll', async () => {
 
   assert.equal(calls, 2);
 });
+
+test('ignores an Anthropic usage response that arrives after shutdown', async () => {
+  await writeAuth();
+  let respond: (() => void) | undefined;
+  globalThis.fetch = ((input: string | URL) =>
+    String(input).endsWith('/api/oauth/usage')
+      ? new Promise<Response>((resolve) => {
+          respond = () =>
+            resolve(new Response(JSON.stringify(anthropicUsage([7, hour], [33, 2 * hour]))));
+        })
+      : Promise.resolve(new Response('', { status: 500 }))) as typeof fetch;
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession();
+  await waitFor(() => respond !== undefined);
+  session.stop();
+  for (const key of ['ui', 'model', 'cwd']) {
+    Object.defineProperty(session.ctx, key, {
+      get: () => {
+        throw new Error('stale ctx');
+      },
+    });
+  }
+  respond?.();
+  await settle(200);
+
+  assert.doesNotThrow(() => mock.timers.tick(hour));
+  assert.deepEqual(session.statuses, []);
+  await assert.rejects(readFile(join(agentDir, 'pi-quota.log'), 'utf-8'));
+});

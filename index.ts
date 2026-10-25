@@ -312,6 +312,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateState(parsed: QuotaState) {
+    if (!ctxRef) return;
     if (parsed.provider === 'anthropic') scheduleAnthropicPing(parsed);
     const existing = states.find((s) => s.provider === parsed.provider);
     if (!existing) {
@@ -666,5 +667,6 @@ export default function (pi: ExtensionAPI) {
 
   pi.on('session_shutdown', () => {
     stopTimers();
+    ctxRef = null;
   });
 }
