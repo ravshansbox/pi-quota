@@ -232,7 +232,7 @@ export default function (pi: ExtensionAPI) {
     if (!ctxRef) return;
 
     const text = buildStatusText();
-    const line = text === undefined ? undefined : ctxRef.ui.theme.fg('muted', text);
+    const line = text === undefined ? undefined : ctxRef.ui.theme.fg('dim', text);
 
     ctxRef.ui.setStatus('pi-quota', line);
   }
