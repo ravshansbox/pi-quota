@@ -202,3 +202,32 @@ test('shows the remaining OpenAI Codex quota for a Codex model', async () => {
 
   assert.equal(session.statuses.at(-1), '90% 2h0m · 60% 1d2h');
 });
+
+test('stops polling after session shutdown during a poll', async () => {
+  await writeFile(
+    join(agentDir, 'auth.json'),
+    JSON.stringify({
+      'openai-codex': { access: 'token', refresh: 'r', expires: Date.now() + hour },
+    }),
+  );
+  let release = () => {};
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    if (calls === 2) await new Promise<void>((resolve) => (release = resolve));
+    return new Response(JSON.stringify({ rate_limit: {} }), { status: 200 });
+  }) as typeof fetch;
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession({ provider: 'openai-codex', id: 'gpt-5.5' });
+  await waitFor(() => session.statuses.length > 0);
+  mock.timers.tick(10 * minute);
+  await waitFor(() => calls === 2);
+  session.stop();
+  release();
+  await settle(100);
+  mock.timers.tick(20 * minute);
+  await settle(100);
+
+  assert.equal(calls, 2);
+});

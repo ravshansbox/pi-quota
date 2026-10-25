@@ -623,10 +623,11 @@ export default function (pi: ExtensionAPI) {
   function scheduleCheck() {
     const next = nextMarkAfter(new Date());
     const delay = Math.max(0, next.getTime() - Date.now());
-    checkTimer = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       await runCycle(false);
-      scheduleCheck();
+      if (checkTimer === timer) scheduleCheck();
     }, delay);
+    checkTimer = timer;
   }
 
   function stopTimers() {
