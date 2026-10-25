@@ -28,8 +28,8 @@ afterEach(() => {
 });
 
 async function waitFor(check: () => boolean | Promise<boolean>) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + 5_000;
+  while (performance.now() < deadline) {
     if (await check()) return;
     await new Promise((resolve) => setImmediate(resolve));
   }
@@ -175,6 +175,33 @@ test('pings the active Anthropic model when a quota window resets', async () => 
 
   const args = await readFile(argsFile, 'utf-8');
   assert.match(args, /--provider anthropic --model claude-sonnet-4-5 -p hi/);
+});
+
+test('pings the active Anthropic model again when the later quota window resets', async () => {
+  const binDir = await mkdtemp(join(tmpdir(), 'pi-bin-'));
+  const argsFile = join(binDir, 'args');
+  await writeFile(join(binDir, 'pi'), `#!/bin/sh\necho "$@" >> "${argsFile}"\n`);
+  await chmod(join(binDir, 'pi'), 0o755);
+  process.env['PATH'] = `${binDir}:${realPath}`;
+
+  await writeAuth();
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  mockFetch(() => anthropicUsage([90, hour], [50, 2 * hour]));
+  const pings = async () => {
+    try {
+      return (await readFile(argsFile, 'utf-8')).trim().split('\n').length;
+    } catch {
+      return 0;
+    }
+  };
+
+  const session = startSession();
+  await waitFor(() => session.statuses.length > 0);
+  mock.timers.tick(hour);
+  await waitFor(async () => (await pings()) === 1);
+  mock.timers.tick(hour);
+  await waitFor(async () => (await pings()) === 2);
+  session.stop();
 });
 
 test('shows the used OpenAI Codex quota for a Codex model', async () => {

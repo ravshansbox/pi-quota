@@ -307,7 +307,10 @@ export default function (pi: ExtensionAPI) {
       .filter((time): time is number => time !== undefined && time > now);
     if (resets.length === 0) return;
     anthropicPingTimer = setTimeout(
-      () => pingProviderOnReset('anthropic'),
+      () => {
+        pingProviderOnReset('anthropic');
+        scheduleAnthropicPing(state);
+      },
       Math.min(...resets) - now,
     );
   }
