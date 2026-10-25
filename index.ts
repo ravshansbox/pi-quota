@@ -106,8 +106,10 @@ function formatResetTime(reset: Date): string {
   const hours = Math.floor((diff % 86400000) / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
 
-  if (days > 0) return `${days}d${hours}h`;
-  if (hours > 0) return `${hours}h${minutes}m`;
+  if (days === 1) return `${days}d${hours}h`;
+  if (days > 1) return `${Math.round(diff / 86400000)}d`;
+  if (hours === 1) return `${hours}h${minutes}m`;
+  if (hours > 1) return `${Math.round(diff / 3600000)}h`;
   if (minutes > 0) return `${minutes}m`;
   return 'now';
 }

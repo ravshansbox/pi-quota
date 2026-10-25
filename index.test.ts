@@ -111,7 +111,7 @@ test('shows the remaining Anthropic quota in the footer', async () => {
   await waitFor(() => session.statuses.length > 0);
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '<dim>93% 1h29m · 67% 3d13h</>');
+  assert.equal(session.statuses.at(-1), '<dim>93% 1h29m · 67% 4d</>');
 });
 
 test('updates the Anthropic quota from response headers', async () => {
@@ -133,7 +133,7 @@ test('updates the Anthropic quota from response headers', async () => {
   });
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '<dim>75% 2h0m · 60% 1d2h</>');
+  assert.equal(session.statuses.at(-1), '<dim>75% 2h · 60% 1d2h</>');
 });
 
 test('calls the Anthropic usage endpoint only at session start', async () => {
@@ -200,7 +200,7 @@ test('shows the remaining OpenAI Codex quota for a Codex model', async () => {
   await waitFor(() => session.statuses.length > 0);
   session.stop();
 
-  assert.equal(session.statuses.at(-1), '<dim>90% 2h0m · 60% 1d2h</>');
+  assert.equal(session.statuses.at(-1), '<dim>90% 2h · 60% 1d2h</>');
 });
 
 test('stops polling after session shutdown during a poll', async () => {
