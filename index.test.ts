@@ -324,3 +324,38 @@ test('reads a Codex reset expiry given as a millisecond string', async () => {
 
   assert.equal(session.statuses.at(-1), '<dim>10% 2h · 40% 1d2h · 1x 5h</>');
 });
+
+test('polls Anthropic again when a new session starts during a poll', async () => {
+  await writeFile(
+    join(agentDir, 'auth.json'),
+    JSON.stringify({
+      anthropic: { access: 'token', refresh: 'r', expires: Date.now() + hour },
+      'openai-codex': { access: 'token', refresh: 'r', expires: Date.now() + hour },
+    }),
+  );
+  let release = () => {};
+  let anthropicCalls = 0;
+  let codexCalls = 0;
+  globalThis.fetch = (async (input: string | URL) => {
+    if (String(input).endsWith('/api/oauth/usage')) {
+      anthropicCalls += 1;
+      return new Response(JSON.stringify(anthropicUsage([7, 2 * hour], [33, 48 * hour])));
+    }
+    codexCalls += 1;
+    if (codexCalls === 2) await new Promise<void>((resolve) => (release = resolve));
+    return new Response(JSON.stringify({ rate_limit: {} }));
+  }) as typeof fetch;
+  mock.timers.enable({ apis: ['setTimeout'] });
+
+  const session = startSession();
+  await waitFor(() => session.statuses.length > 0);
+  mock.timers.tick(10 * minute);
+  await waitFor(() => codexCalls === 2);
+  session.emit('session_start', {});
+  release();
+  await waitFor(() => anthropicCalls === 2);
+  await settle(100);
+  session.stop();
+
+  assert.equal(session.statuses.at(-1), '<dim>7% 2h · 33% 2d</>');
+});

@@ -196,7 +196,7 @@ export default function (pi: ExtensionAPI) {
   let anthropicPingTimer: ReturnType<typeof setTimeout> | null = null;
   let ctxRef: ExtensionContext | null = null;
   let codexRedeemAttempted = false;
-  let cycleRunning = false;
+  let cycle: Promise<void> | null = null;
 
   function notifyRefreshOnce(provider: string, message: string) {
     if (refreshNotified.has(provider)) return;
@@ -617,17 +617,19 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function runCycle(includeAnthropic: boolean) {
-    if (cycleRunning) return;
-    cycleRunning = true;
-    try {
-      await pollQuotaStatus(includeAnthropic);
-      await tryAutoRedeemCodexReset();
-      updateStatus();
-    } catch (error) {
-      await logError('Run cycle error:', error);
-    } finally {
-      cycleRunning = false;
-    }
+    if (cycle) return;
+    cycle = (async () => {
+      try {
+        await pollQuotaStatus(includeAnthropic);
+        await tryAutoRedeemCodexReset();
+        updateStatus();
+      } catch (error) {
+        await logError('Run cycle error:', error);
+      } finally {
+        cycle = null;
+      }
+    })();
+    await cycle;
   }
 
   function scheduleCheck() {
@@ -654,7 +656,7 @@ export default function (pi: ExtensionAPI) {
     ctxRef = ctx;
     codexRedeemAttempted = false;
 
-    void runCycle(true);
+    void (cycle ?? Promise.resolve()).then(() => runCycle(true));
     scheduleCheck();
   });
 
