@@ -629,7 +629,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (result.code === 'reset') {
-      ctxRef?.ui.notify('pi-quota: saved reset redeemed successfully', 'info');
+      if (!ctxRef) return;
+      ctxRef.ui.notify('pi-quota: saved reset redeemed successfully', 'info');
       await pollQuotaStatus(false);
       updateStatus();
     } else {
