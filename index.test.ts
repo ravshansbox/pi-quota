@@ -453,7 +453,9 @@ test('polls Anthropic again when a new session starts during a poll', async () =
   globalThis.fetch = (async (input: string | URL) => {
     if (String(input).endsWith('/api/oauth/usage')) {
       anthropicCalls += 1;
-      return new Response(JSON.stringify(anthropicUsage([7, 2 * hour], [33, 48 * hour])));
+      return new Response(
+        JSON.stringify(anthropicUsage([7, 2 * hour + 30_000], [33, 48 * hour + 30_000])),
+      );
     }
     codexCalls += 1;
     if (codexCalls === 2) await new Promise<void>((resolve) => (release = resolve));
