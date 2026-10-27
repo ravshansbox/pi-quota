@@ -22,6 +22,7 @@ Pi loads the extension from `./index.ts` and shows the used quota for the provid
 - Both providers are checked on session start whenever their credentials exist, so quota is already known when the active model changes
 - Refreshes Anthropic and OpenAI Codex OAuth access tokens from `~/.pi/agent/auth.json` when needed, writes updated credentials back (re-reading the file first to avoid clobbering concurrent updates), and notifies on the first successful refresh per provider each session
 - Appends poll and token-refresh errors to `~/.pi/agent/pi-quota.log`
+- Does nothing outside the TUI (RPC, JSON and print modes, including subagents)
 
 ## Configuration
 

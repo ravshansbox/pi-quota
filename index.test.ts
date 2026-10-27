@@ -118,18 +118,53 @@ test('shows the used Anthropic quota in the footer', async () => {
   assert.equal(session.statuses.at(-1), '<dim>7% 1h29m · 33% 4d</>');
 });
 
-test('does not touch the footer outside the TUI', async () => {
-  await writeAuth();
-  const calls = mockFetch(() => anthropicUsage([7, hour], [33, 2 * hour]));
+for (const mode of ['rpc', 'json', 'print']) {
+  test(`does not poll the quota in ${mode} mode`, async () => {
+    await writeFile(
+      join(agentDir, 'auth.json'),
+      JSON.stringify({
+        anthropic: { access: 'old', refresh: 'r', expires: Date.now() - 1 },
+        'openai-codex': { access: 'old', refresh: 'r', expires: Date.now() - 1 },
+      }),
+    );
+    const calls = mockFetch(() => anthropicUsage([7, hour], [33, 2 * hour]));
 
-  const session = startSession(undefined, 'rpc');
-  await waitFor(() => calls.length > 0);
-  await settle(50);
-  session.stop();
+    const session = startSession(undefined, mode);
+    await settle(50);
+    session.stop();
 
-  assert.deepEqual(session.statuses, []);
-  await assert.rejects(readFile(join(agentDir, 'pi-quota.log'), 'utf-8'));
-});
+    assert.deepEqual(calls, []);
+    assert.deepEqual(session.statuses, []);
+  });
+
+  test(`does not ping at quota reset in ${mode} mode`, async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'pi-bin-'));
+    const argsFile = join(binDir, 'args');
+    await writeFile(join(binDir, 'pi'), `#!/bin/sh\necho "$@" > "${argsFile}"\n`);
+    await chmod(join(binDir, 'pi'), 0o755);
+    process.env['PATH'] = `${binDir}:${realPath}`;
+    mockFetch(() => undefined);
+    mock.timers.enable({ apis: ['setTimeout'] });
+
+    const session = startSession(undefined, mode);
+    const seconds = (ms: number) => String(Math.floor((Date.now() + ms) / 1000));
+    session.emit('after_provider_response', {
+      type: 'after_provider_response',
+      status: 200,
+      headers: {
+        'anthropic-ratelimit-unified-5h-utilization': '0.9',
+        'anthropic-ratelimit-unified-5h-reset': seconds(hour),
+        'anthropic-ratelimit-unified-7d-utilization': '0.5',
+        'anthropic-ratelimit-unified-7d-reset': seconds(2 * hour),
+      },
+    });
+    mock.timers.tick(3 * hour);
+    await settle(1000);
+    session.stop();
+
+    await assert.rejects(readFile(argsFile, 'utf-8'));
+  });
+}
 
 test('updates the Anthropic quota from response headers', async () => {
   await writeAuth();

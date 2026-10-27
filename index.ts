@@ -673,6 +673,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on('session_start', (_event, ctx) => {
+    if (ctx.mode !== 'tui') return;
     stopTimers();
     states.length = 0;
     refreshNotified.clear();
@@ -684,7 +685,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on('after_provider_response', (event, ctx) => {
-    if (ctx.model?.provider !== modelProviderNames.anthropic) return;
+    if (ctx.mode !== 'tui' || ctx.model?.provider !== modelProviderNames.anthropic) return;
     const next = parseAnthropicHeaders(event.headers);
     if (!next) return;
     ctxRef = ctx;
