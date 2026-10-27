@@ -12,7 +12,7 @@ Add `-l` to install it in project settings.
 
 ## Usage
 
-Pi loads the extension from `./index.ts` and shows the used quota for the provider backing the active model in the footer.
+Pi loads the extension from `./index.ts` and shows the used quota for the provider backing the active model in the footer when pi runs in the TUI.
 
 - Calls the Anthropic usage endpoint once on session start, then reads the Anthropic quota from the rate limit headers of each Anthropic response, and calls it again after the reset ping (or at the reset when the active model is not from Anthropic)
 - Polls the OpenAI Codex usage endpoint on session start, then at every 10-minute wall-clock mark (`HH:00`, `HH:10`, `HH:20`, `HH:30`, `HH:40`, `HH:50`)

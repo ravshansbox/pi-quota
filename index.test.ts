@@ -73,7 +73,7 @@ async function writeAuth() {
   );
 }
 
-function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }) {
+function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }, mode = 'tui') {
   const handlers = new Map<string, Handler>();
   const pi = {
     on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -83,6 +83,7 @@ function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }
   const statuses: (string | undefined)[] = [];
   const ctx = {
     cwd: agentDir,
+    mode,
     model,
     ui: {
       setStatus: (key: string, text: string | undefined) => {
@@ -90,7 +91,10 @@ function startSession(model = { provider: 'anthropic', id: 'claude-sonnet-4-5' }
         statuses.push(text);
       },
       notify: () => {},
-      theme: { fg: (colour: string, text: string) => `<${colour}>${text}</>` },
+      get theme() {
+        if (mode !== 'tui') throw new Error('Theme not initialized. Call initTheme() first.');
+        return { fg: (colour: string, text: string) => `<${colour}>${text}</>` };
+      },
     },
   };
   handlers.get('session_start')?.({}, ctx);
@@ -112,6 +116,19 @@ test('shows the used Anthropic quota in the footer', async () => {
   session.stop();
 
   assert.equal(session.statuses.at(-1), '<dim>7% 1h29m · 33% 4d</>');
+});
+
+test('does not touch the footer outside the TUI', async () => {
+  await writeAuth();
+  const calls = mockFetch(() => anthropicUsage([7, hour], [33, 2 * hour]));
+
+  const session = startSession(undefined, 'rpc');
+  await waitFor(() => calls.length > 0);
+  await settle(50);
+  session.stop();
+
+  assert.deepEqual(session.statuses, []);
+  await assert.rejects(readFile(join(agentDir, 'pi-quota.log'), 'utf-8'));
 });
 
 test('updates the Anthropic quota from response headers', async () => {
